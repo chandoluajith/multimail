@@ -1,0 +1,87 @@
+name                 = "mailstracker"
+pages_build_output_dir = "dist"
+compatibility_date   = "2024-09-23"
+
+# ── D1 Database ────────────────────────────────────────────────────────────────
+# Set database_id to your real Cloudflare D1 ID before deploying.
+# Find it at: Cloudflare Dashboard → Workers & Pages → D1 → mailstracker-db
+#
+# SECURITY: D1 databases are NOT publicly accessible.
+# They can only be reached through Workers/Pages bindings — there is no
+# direct internet-facing connection string, no port to firewall.
+[[d1_databases]]
+binding       = "DB"
+database_name = "mailstracker-db"
+database_id   = "local-dev-db"    # ← replace with real ID from Cloudflare dashboard
+
+# ── HTTPS Enforcement ─────────────────────────────────────────────────────────
+# Cloudflare enforces HTTPS automatically for Pages projects.
+# Ensure these settings are enabled in the Cloudflare dashboard:
+#
+#   1. SSL/TLS → Overview → Full (Strict)
+#      Encrypts traffic end-to-end; rejects invalid/self-signed origin certs.
+#
+#   2. SSL/TLS → Edge Certificates → Always Use HTTPS = ON
+#      Redirects all plain HTTP requests to HTTPS with a 301.
+#
+#   3. SSL/TLS → Edge Certificates → HTTP Strict Transport Security (HSTS):
+#      max-age=31536000; includeSubDomains; preload
+#      (Set this ONLY after verifying HTTPS works — it cannot be undone quickly)
+#
+#   4. SSL/TLS → Edge Certificates → Minimum TLS Version = TLS 1.2
+#      Blocks clients that only support SSL 3.0 or TLS 1.0/1.1.
+#
+# The application also sets the following header on every response (see security.ts):
+#   Strict-Transport-Security: max-age=31536000; includeSubDomains
+# This provides defence-in-depth even if the Cloudflare HSTS setting is missed.
+
+# ── Security Headers ──────────────────────────────────────────────────────────
+# All security headers are set programmatically in functions/utils/security.ts
+# (getSecurityHeaders). They include:
+#   Content-Security-Policy  — strict; blocks inline scripts and unknown sources
+#   X-Frame-Options          — DENY
+#   X-Content-Type-Options   — nosniff
+#   Referrer-Policy          — strict-origin-when-cross-origin
+#   Permissions-Policy       — disables camera, microphone, geolocation
+#   Strict-Transport-Security — max-age=31536000; includeSubDomains
+#   Cache-Control            — no-store on all auth endpoints
+
+# ── Secrets (never put values here) ──────────────────────────────────────────
+# Set ALL secrets via Cloudflare dashboard → Settings → Environment Variables
+# → Secrets (Encrypted), or via the CLI:
+#
+#   wrangler pages secret put JWT_SECRET
+#   wrangler pages secret put ENCRYPT_SECRET
+#   wrangler pages secret put GOOGLE_CLIENT_ID
+#   wrangler pages secret put GOOGLE_CLIENT_SECRET
+#   wrangler pages secret put APP_URL
+#
+# Required secrets and how to generate them:
+#   JWT_SECRET          — min 32 chars:  openssl rand -base64 48
+#   ENCRYPT_SECRET      — min 32 chars:  openssl rand -hex 32
+#   GOOGLE_CLIENT_ID    — from Google Cloud Console (OAuth 2.0 Client)
+#   GOOGLE_CLIENT_SECRET— from Google Cloud Console (OAuth 2.0 Client)
+#   APP_URL             — your Pages domain, e.g. https://mailstracker.pages.dev
+#
+# Local development only — never commit this file:
+#   Create .dev.vars with the above key=value pairs (already in .gitignore)
+
+# ── Audit Logging ─────────────────────────────────────────────────────────────
+# Security events are written to the `audit_log` D1 table by functions/utils/logger.ts
+# Events logged include:
+#   auth_login_success / auth_login_failure / auth_csrf_blocked
+#   auth_lockout / auth_logout
+#   bot_blocked / origin_blocked / rate_limit_ip / rate_limit_user
+#   idor_attempt (severity: critical)
+#   api_error_5xx (severity: critical)
+#
+# To query recent critical events in production:
+#   wrangler d1 execute mailstracker-db \
+#     --command "SELECT * FROM audit_log WHERE severity='critical' ORDER BY timestamp DESC LIMIT 50"
+#
+# To check for suspicious IPs (≥3 IDOR attempts in last hour):
+#   wrangler d1 execute mailstracker-db \
+#     --command "SELECT ip, COUNT(*) as n FROM audit_log WHERE event_type='idor_attempt' AND timestamp > strftime('%s','now','-1 hour') GROUP BY ip HAVING n >= 3"
+#
+# Retention: entries older than 30 days are purged automatically (probabilistic
+# cleanup on each write — no cron job required).
