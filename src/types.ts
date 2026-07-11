@@ -78,3 +78,37 @@ export interface DashboardStats {
   resetsToday: number;
   upcomingResets: number;
 }
+
+export interface SecurityEvent {
+  id: string;
+  timestamp: number; // unix seconds
+  event_type: string;
+  severity: 'info' | 'warn' | 'critical';
+  ip: string;
+  method: string | null;
+  path: string | null;
+  status: number | null;
+  details: Record<string, any> | null;
+}
+
+export interface SecuritySummary {
+  total: number;
+  critical: number;
+  warnings: number;
+}
+
+export interface SecurityEventsResponse {
+  events: SecurityEvent[];
+  summary: SecuritySummary;
+}
+
+export interface AnomalyReport {
+  ip: string;
+  windowMinutes: number;
+  isSuspicious: boolean;
+  reason: string | null;
+  eventCounts: Record<string, number>;
+  firstSeen: number | null;
+  lastSeen: number | null;
+}
+

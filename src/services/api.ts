@@ -1,4 +1,4 @@
-import { Email, Service, EmailService, UsageHistory, AppSettings } from '../types';
+import { Email, Service, EmailService, UsageHistory, AppSettings, SecurityEventsResponse, AnomalyReport } from '../types';
 
 const API_BASE = '/api';
 
@@ -97,4 +97,22 @@ export const api = {
     const res = await f(`${API_BASE}/actions/clear`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to clear database');
   },
+
+  // ── Audit & Security ──────────────────────────────────────────────────────
+  async getSecurityEvents(limit?: number, since?: number): Promise<SecurityEventsResponse> {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.append('limit', String(limit));
+    if (since !== undefined) params.append('since', String(since));
+    const res = await f(`${API_BASE}/audit/events?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch security events');
+    return res.json();
+  },
+  async getAnomalyReport(windowMinutes?: number): Promise<AnomalyReport> {
+    const params = new URLSearchParams();
+    if (windowMinutes !== undefined) params.append('window', String(windowMinutes));
+    const res = await f(`${API_BASE}/audit/anomalies?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch anomaly report');
+    return res.json();
+  },
 };
+

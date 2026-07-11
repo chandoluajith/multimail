@@ -7,6 +7,7 @@ import {
  History, 
  BarChart3, 
  Settings, 
+ Shield,
  ShieldCheck,
  AlertTriangle,
  Clock,
@@ -32,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
  { id: 'services', name: 'AI Services', icon: Cpu },
  { id: 'history', name: 'Usage History', icon: History },
  { id: 'stats', name: 'Statistics', icon: BarChart3 },
+ { id: 'security', name: 'Security & Audit', icon: Shield },
  { id: 'settings', name: 'Settings', icon: Settings },
  ];
 

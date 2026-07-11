@@ -6,6 +6,7 @@ import {
   Cpu, 
   History, 
   Settings,
+  Shield,
 } from 'lucide-react';
 
 interface MobileNavProps {
@@ -21,6 +22,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, setActiveTab })
     { id: 'accounts', name: 'Accounts', icon: Mail },
     { id: 'services', name: 'Services', icon: Cpu },
     { id: 'history', name: 'History', icon: History },
+    { id: 'security', name: 'Security', icon: Shield },
     { id: 'settings', name: 'Settings', icon: Settings },
   ];
 

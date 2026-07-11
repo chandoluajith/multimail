@@ -7,6 +7,7 @@ import { ServicesView } from './components/ServicesView';
 import { HistoryView } from './components/HistoryView';
 import { StatsView } from './components/StatsView';
 import { SettingsView } from './components/SettingsView';
+import { SecurityView } from './components/SecurityView';
 import { useApp } from './context/AppContext';
 import { useAuth } from './context/AuthContext';
 import { LoginPage } from './components/LoginPage';
@@ -23,10 +24,12 @@ export default function App() {
       case 'services':  return <ServicesView />;
       case 'history':   return <HistoryView />;
       case 'stats':     return <StatsView />;
+      case 'security':  return <SecurityView />;
       case 'settings':  return <SettingsView />;
       default:          return <DashboardView />;
     }
   };
+
 
   // Resolve auth first
   if (isAuthLoading) {
