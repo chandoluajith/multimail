@@ -21,12 +21,12 @@
  *   - Per-user bucket (20/min) — prevents audit log probing.
  */
 
-import { assertSecretStrength } from '../../../utils/jwt';
+import { assertSecretStrength } from '../../utils/jwt';
 import {
   getSecurityHeaders, isOriginAllowed, isHumanUserAgent, checkRateLimit,
-} from '../../../utils/security';
-import { detectAnomalies } from '../../../utils/logger';
-import { resolveSession }    from '../../../utils/rbac';
+} from '../../utils/security';
+import { detectAnomalies } from '../../utils/logger';
+import { resolveSession }    from '../../utils/rbac';
 
 interface Env {
   DB:         D1Database;
