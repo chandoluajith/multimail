@@ -54,14 +54,15 @@ function validateSecrets(env: Env): ValidationResult {
   }
 
   // GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — OAuth 2.0
-  // Required in production so a deployment without them fails loudly.
-  // In local dev, the app can start without them (OAuth just won't work).
+  // These are optional: if missing, Google OAuth won't work but the rest of
+  // the app (local accounts, manual tracking) will function normally.
+  // OAuth endpoints should check for these individually and return a clear
+  // error if a user tries to use Google sign-in without them configured.
   if (!isLocalDev) {
-    if (!env.GOOGLE_CLIENT_ID) {
-      errors.push('GOOGLE_CLIENT_ID is not set');
-    }
-    if (!env.GOOGLE_CLIENT_SECRET) {
-      errors.push('GOOGLE_CLIENT_SECRET is not set');
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+      console.warn(
+        '[CONFIG] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set — Google OAuth disabled',
+      );
     }
   }
 
