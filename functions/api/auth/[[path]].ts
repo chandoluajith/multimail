@@ -28,7 +28,7 @@ function generateState(): string {
 
 /** Build secure cookie flags for the current environment */
 function cookieFlags(appUrl: string, path: string, maxAge: number): string {
-  return `HttpOnly; Secure; SameSite=Strict; Path=${path}; Max-Age=${maxAge}`;
+  return `HttpOnly; Secure; SameSite=Lax; Path=${path}; Max-Age=${maxAge}`;
 }
 
 // ─── Revocation helpers ───────────────────────────────────────────────────────
