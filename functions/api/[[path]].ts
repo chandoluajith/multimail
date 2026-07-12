@@ -27,6 +27,24 @@ interface Env {
 function toBool(v: any): boolean { return v === 1 || v === true || v === 'true'; }
 function fromBool(v: any): number { return v ? 1 : 0; }
 
+function normalizeStatus(status: any): StatusType {
+  switch (status) {
+    case 'Active':
+      return 'Available';
+    case 'Limited':
+      return 'Limit Reached';
+    case 'Cooldown':
+      return 'Cooling Down';
+    case 'Available':
+    case 'Cooling Down':
+    case 'Limit Reached':
+    case 'Resetting Soon':
+    case 'Unknown':
+    default:
+      return status as StatusType;
+  }
+}
+
 // requireAuth() removed — use resolveSession() from utils/rbac.ts (handles
 // cookie parse, JWT verify, and revocation check in one canonical call).
 
@@ -45,7 +63,7 @@ function serviceRow(s: any): Service {
 function esRow(es: any): EmailService {
   return {
     id: es.id, emailId: es.emailId, serviceId: es.serviceId,
-    status: es.status as StatusType,
+    status: normalizeStatus(es.status),
     remainingRequests: es.remainingRequests ?? undefined,
     maximumRequests: es.maximumRequests ?? undefined,
     lastUsed: es.lastUsed || undefined,
@@ -67,7 +85,7 @@ function settingsRow(s: any): AppSettings {
     },
     timeFormat: s.timeFormat as '12h' | '24h',
     defaultCooldownDuration: s.defaultCooldownDuration,
-    defaultStatus: s.defaultStatus as StatusType,
+    defaultStatus: normalizeStatus(s.defaultStatus),
   };
 }
 

@@ -56,7 +56,16 @@ function isOneOf<T extends string>(v: unknown, options: readonly T[]): v is T {
 
 // ── Domain constants ──────────────────────────────────────────────────────────
 
-export const STATUS_VALUES    = ['Active', 'Limited', 'Cooldown', 'Unknown'] as const;
+export const STATUS_VALUES    = [
+  'Available',
+  'Cooling Down',
+  'Limit Reached',
+  'Resetting Soon',
+  'Unknown',
+  'Active',
+  'Limited',
+  'Cooldown',
+] as const;
 export const COOLDOWN_UNITS   = ['hours', 'days', 'minutes'] as const;
 export const THEME_VALUES     = ['dark', 'light', 'system'] as const;
 export const TIMEFORMAT_VALUES = ['12h', '24h'] as const;
