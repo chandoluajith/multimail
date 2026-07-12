@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "dev:worker": "wrangler pages dev dist --port 8788 --local",
-    "dev:all": "mkdir -p dist && concurrently -n \"vite,worker\" -c \"cyan,yellow\" \"vite\" \"wrangler pages dev dist --port 8788 --local\"",
+    "dev:worker": "wrangler pages dev dist --port 8788 --local --config wrangler.local.toml",
+    "dev:all": "mkdir -p dist && concurrently -n \"vite,worker\" -c \"cyan,yellow\" \"vite\" \"wrangler pages dev dist --port 8788 --local --config wrangler.local.toml\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "db:init": "wrangler d1 execute mailstracker-db --local --file=./schema.sql",
+    "db:init": "wrangler d1 execute mailstracker-db --local --file=./schema.sql --config wrangler.local.toml",
     "setup": "npm install && mkdir -p dist && npm run db:init && echo '✅ Ready! Run: npm run dev:all'"
   },
   "dependencies": {
