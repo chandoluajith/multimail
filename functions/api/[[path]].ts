@@ -133,6 +133,52 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const relativePath = url.pathname.substring('/api'.length);
   const segments     = relativePath.split('/').filter(Boolean);
 
+  // ── GET /api/health ────────────────────────────────────────────────────────
+  if (method === 'GET' && segments[0] === 'health') {
+    const status: Record<string, any> = {
+      database: {
+        connected: false,
+        tablesExist: false,
+        error: null
+      },
+      env: {
+        APP_URL: env.APP_URL ? 'configured' : 'missing',
+        JWT_SECRET: env.JWT_SECRET ? 'configured' : 'missing',
+        ENCRYPT_SECRET: env.ENCRYPT_SECRET ? 'configured' : 'missing',
+        GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID ? 'configured' : 'missing',
+        GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET ? 'configured' : 'missing',
+      }
+    };
+
+    if (db) {
+      status.database.connected = true;
+      try {
+        await db.prepare('SELECT 1 FROM users LIMIT 1').first();
+        status.database.tablesExist = true;
+      } catch (e: any) {
+        status.database.error = e.message || String(e);
+      }
+    } else {
+      status.database.error = 'DB binding is not configured in Wrangler / Cloudflare Pages Dashboard.';
+    }
+
+    const allOk = status.database.connected && status.database.tablesExist &&
+                  env.APP_URL && env.JWT_SECRET && env.ENCRYPT_SECRET &&
+                  env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET;
+
+    return new Response(JSON.stringify({
+      ok: !!allOk,
+      ...status
+    }), {
+      status: allOk ? 200 : 500,
+      headers: {
+        ...h,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate'
+      }
+    });
+  }
+
   // ── Auth guard ────────────────────────────────────────────────────────────
   // resolveSession() handles cookie parse, JWT verify, and revoked_tokens lookup.
   const auth = await resolveSession(request, db, env.JWT_SECRET);

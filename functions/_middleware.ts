@@ -41,7 +41,6 @@ interface ValidationResult {
  */
 function validateSecrets(env: Env): ValidationResult {
   const errors: string[] = [];
-  const isLocalDev = env.APP_URL?.includes('localhost') || env.APP_URL?.includes('127.0.0.1');
 
   // JWT_SECRET — signs all session tokens (always required)
   if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
@@ -49,21 +48,17 @@ function validateSecrets(env: Env): ValidationResult {
   }
 
   // APP_URL — used for CSRF origin checks and OAuth redirect URIs
-  if (!env.APP_URL || !env.APP_URL.startsWith('http')) {
-    errors.push('APP_URL must be a valid URL (starts with http:// or https://)');
+  if (!env.APP_URL || !env.APP_URL.startsWith('https://')) {
+    errors.push('APP_URL must be a valid HTTPS URL (starts with https://)');
   }
 
   // GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — OAuth 2.0
-  // These are optional: if missing, Google OAuth won't work but the rest of
-  // the app (local accounts, manual tracking) will function normally.
-  // OAuth endpoints should check for these individually and return a clear
-  // error if a user tries to use Google sign-in without them configured.
-  if (!isLocalDev) {
-    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
-      console.warn(
-        '[CONFIG] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set — Google OAuth disabled',
-      );
-    }
+  // Required in production so a deployment without them fails loudly.
+  if (!env.GOOGLE_CLIENT_ID) {
+    errors.push('GOOGLE_CLIENT_ID is not set');
+  }
+  if (!env.GOOGLE_CLIENT_SECRET) {
+    errors.push('GOOGLE_CLIENT_SECRET is not set');
   }
 
   return { ok: errors.length === 0, errors };
@@ -76,16 +71,14 @@ function validateSecrets(env: Env): ValidationResult {
  * These apply to EVERY route (page + API) through the middleware.
  * API-specific handlers in security.ts may add additional headers.
  */
-function addGlobalSecurityHeaders(res: Response, isLocalDev: boolean): Response {
+function addGlobalSecurityHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
 
-  // HSTS — tell browsers to always use HTTPS (skip in local dev)
-  if (!isLocalDev) {
-    headers.set(
-      'Strict-Transport-Security',
-      'max-age=31536000; includeSubDomains',
-    );
-  }
+  // HSTS — tell browsers to always use HTTPS
+  headers.set(
+    'Strict-Transport-Security',
+    'max-age=31536000; includeSubDomains',
+  );
 
   // Prevent MIME-type sniffing
   headers.set('X-Content-Type-Options', 'nosniff');
@@ -111,12 +104,11 @@ function addGlobalSecurityHeaders(res: Response, isLocalDev: boolean): Response 
 export const onRequest: PagesFunction<Env> = async (ctx) => {
   const { request, env, next } = ctx;
   const url = new URL(request.url);
-  const isLocalDev = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
 
   // ── 1. HTTPS enforcement ───────────────────────────────────────────────────
   // Cloudflare normally enforces HTTPS before the Worker runs, but as an
   // extra layer we reject any HTTP request that reaches the Worker.
-  if (url.protocol === 'http:' && !isLocalDev) {
+  if (url.protocol === 'http:') {
     const httpsUrl = new URL(request.url);
     httpsUrl.protocol = 'https:';
     return Response.redirect(httpsUrl.toString(), 301);
@@ -147,5 +139,5 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const response = await next();
 
   // ── 4. Attach global security headers to every outgoing response ──────────
-  return addGlobalSecurityHeaders(response, isLocalDev);
+  return addGlobalSecurityHeaders(response);
 };

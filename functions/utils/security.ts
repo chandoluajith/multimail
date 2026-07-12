@@ -50,7 +50,6 @@ const LOCKOUT_SECONDS      = 900; // 15 minutes
 // ─── 1. Hardened response headers ─────────────────────────────────────────────
 
 export function getSecurityHeaders(appUrl: string): Record<string, string> {
-  const isLocalhost = appUrl.includes('localhost');
   return {
     // CORS
     'Content-Type':                     'application/json',
@@ -75,9 +74,7 @@ export function getSecurityHeaders(appUrl: string): Record<string, string> {
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
 
     // Force HTTPS for 2 years in production
-    ...(isLocalhost ? {} : {
-      'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
-    }),
+    'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
   };
 }
 
