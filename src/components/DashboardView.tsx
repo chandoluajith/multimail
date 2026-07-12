@@ -18,7 +18,8 @@ import {
  Mail,
  BarChart3,
  Sun,
- Moon
+ Moon,
+ Database
 } from 'lucide-react';
 import { StatusType, ProviderType } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -32,7 +33,8 @@ export const DashboardView: React.FC = () => {
  endSession, 
  reachLimit, 
  resetTimer, 
- updateStatus
+ updateStatus,
+ dbStatus
  } = useApp();
  const { resolvedTheme, toggleTheme } = useTheme();
 
@@ -270,6 +272,41 @@ export const DashboardView: React.FC = () => {
 
  {/* Right: Live badge + Theme toggle */}
  <div className="flex items-center gap-2 flex-shrink-0 mt-1">
+ {/* DB Status pill — left of Last Sync */}
+ {(() => {
+  const isConnected = dbStatus === 'connected';
+  const isError = dbStatus === 'error';
+  const isChecking = dbStatus === 'checking';
+  return (
+   <div
+    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs"
+    title={isConnected ? 'Database connected' : isError ? 'Database connection error' : 'Connecting…'}
+    style={{
+     background: 'var(--bg-surface-alt)',
+     borderColor: isError ? 'rgba(239,68,68,0.3)' : isConnected ? 'rgba(16,185,129,0.3)' : 'var(--border-primary)',
+     boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+    }}
+   >
+    <span
+     className="flex items-center gap-1 font-bold px-2 py-0.5 rounded-full border text-[11px]"
+     style={{
+      color: isError ? '#f87171' : isConnected ? '#34d399' : 'var(--text-secondary)',
+      background: isError ? 'rgba(239,68,68,0.1)' : isConnected ? 'rgba(16,185,129,0.1)' : 'var(--bg-surface)',
+      borderColor: isError ? 'rgba(239,68,68,0.2)' : isConnected ? 'rgba(16,185,129,0.2)' : 'var(--border-primary)',
+     }}
+    >
+     <Database size={11} />
+     {isChecking && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
+     {isConnected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
+     {isError && <span className="w-1.5 h-1.5 rounded-full bg-red-400" />}
+     <span className="hidden sm:inline">
+      {isConnected ? 'DB' : isError ? 'DB Err' : 'DB…'}
+     </span>
+    </span>
+   </div>
+  );
+ })()}
+
  {/* Last Sync: Live pill */}
  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs"
  style={{

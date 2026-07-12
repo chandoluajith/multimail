@@ -3,6 +3,8 @@ import { Email, Service, EmailService, UsageHistory, AppSettings, StatusType, Pr
 import { DEFAULT_SERVICES, DEFAULT_SETTINGS, MOCK_EMAILS, MOCK_EMAIL_SERVICES, MOCK_HISTORY } from '../mockData';
 import { api } from '../services/api';
 
+type DbStatus = 'checking' | 'connected' | 'error';
+
 interface AppContextType {
   emails: Email[];
   services: Service[];
@@ -10,6 +12,7 @@ interface AppContextType {
   history: UsageHistory[];
   settings: AppSettings;
   isLoading: boolean;
+  dbStatus: DbStatus;
   addEmail: (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => void;
   deleteEmail: (id: string) => void;
   updateEmail: (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => void;
@@ -48,6 +51,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
 
   // ── Sound effects ─────────────────────────────────────────────────────────
   const playSound = useCallback((type: 'complete' | 'limit') => {
@@ -107,10 +111,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setEmailServices(data.emailServices);
         setHistory(data.history);
         setSettings(data.settings);
+        setDbStatus('connected');
       } catch (err) {
         // Surface the error to the UI — do NOT silently fall back to stale or
         // mock data, as that could show one user another's placeholder records.
         console.error('[AppContext] Failed to load data from API:', err);
+        setDbStatus('error');
       } finally {
         setIsLoading(false);
         setMounted(true);
@@ -553,7 +559,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      emails, services, emailServices, history, settings, isLoading,
+      emails, services, emailServices, history, settings, isLoading, dbStatus,
       addEmail, deleteEmail, updateEmail,
       addService, deleteService, updateService,
       updateStatus, startSession, endSession, reachLimit, resetTimer,
