@@ -67,9 +67,13 @@ export const HistoryView: React.FC = () => {
  });
  };
 
- const handleClearLogs = () => {
+ const handleClearLogs = async () => {
  if (window.confirm('Are you sure you want to delete all history logs? This action cannot be undone.')) {
- clearHistory();
+ try {
+ await clearHistory();
+ } catch (error) {
+ console.error('Failed to clear history', error);
+ }
  }
  };
 

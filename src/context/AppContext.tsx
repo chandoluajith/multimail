@@ -33,12 +33,12 @@ interface AppContextType {
   endSession: (emailId: string, serviceId: string, notes?: string) => void;
   reachLimit: (emailId: string, serviceId: string, cooldownMinutes?: number, notes?: string) => void;
   resetTimer: (emailId: string, serviceId: string) => void;
-  loadMockData: () => void;
-  clearDatabase: () => void;
-  clearHistory: () => void;
+  loadMockData: () => Promise<void>;
+  clearDatabase: () => Promise<void>;
+  clearHistory: () => Promise<void>;
   updateSettings: (newSettings: Partial<AppSettings>) => void;
   exportData: () => string;
-  importData: (jsonData: string) => boolean;
+  importData: (jsonData: string) => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -52,6 +52,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
+
+  const refreshFromServer = useCallback(async () => {
+    const data = await api.getAllData();
+    setEmails(data.emails);
+    setServices(data.services.length > 0 ? data.services : DEFAULT_SERVICES);
+    setEmailServices(data.emailServices);
+    setHistory(data.history);
+    setSettings(data.settings);
+  }, []);
 
   // ── Sound effects ─────────────────────────────────────────────────────────
   const playSound = useCallback((type: 'complete' | 'limit') => {
@@ -105,12 +114,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await api.getAllData();
-        setEmails(data.emails);
-        setServices(data.services.length > 0 ? data.services : DEFAULT_SERVICES);
-        setEmailServices(data.emailServices);
-        setHistory(data.history);
-        setSettings(data.settings);
+        await refreshFromServer();
         setDbStatus('connected');
       } catch (err) {
         // Surface the error to the UI — do NOT silently fall back to stale or
@@ -123,7 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
     load();
-  }, []);
+  }, [refreshFromServer]);
 
   // ── Refs for background timer ─────────────────────────────────────────────
   const emailsRef = useRef(emails);
@@ -499,35 +503,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         history: MOCK_HISTORY,
         settings: DEFAULT_SETTINGS,
       });
-      setEmails(MOCK_EMAILS);
-      setServices(DEFAULT_SERVICES);
-      setEmailServices(MOCK_EMAIL_SERVICES);
-      setHistory(MOCK_HISTORY);
-      setSettings(DEFAULT_SETTINGS);
-    } catch {
-      // Fallback to local only
-      setEmails(MOCK_EMAILS);
-      setServices(DEFAULT_SERVICES);
-      setEmailServices(MOCK_EMAIL_SERVICES);
-      setHistory(MOCK_HISTORY);
-      setSettings(DEFAULT_SETTINGS);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to load mock data', error);
+      throw error;
     }
   };
 
   const clearDatabase = async () => {
     try {
       await api.clearDatabase();
-    } catch { /* ignore */ }
-    setEmails([]);
-    setServices(DEFAULT_SERVICES);
-    setEmailServices([]);
-    setHistory([]);
-    setSettings(DEFAULT_SETTINGS);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to clear database', error);
+      throw error;
+    }
   };
 
   const clearHistory = async () => {
-    setHistory([]);
-    api.clearHistory().catch(console.error);
+    try {
+      await api.clearHistory();
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to clear history', error);
+      throw error;
+    }
   };
 
   const updateSettings = (newSettings: Partial<AppSettings>) => {
@@ -537,19 +537,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notifications: { ...settings.notifications, ...(newSettings.notifications || {}) },
     };
     setSettings(merged);
-    api.saveSettings(merged).catch(console.error);
+    api.saveSettings(merged)
+      .then(() => refreshFromServer())
+      .catch((error) => console.error('Failed to save settings', error));
   };
 
   const exportData = () => JSON.stringify({ emails, services, emailServices, history, settings, version: '1.0.0' }, null, 2);
 
-  const importData = (jsonData: string) => {
+  const importData = async (jsonData: string) => {
     try {
       const data = JSON.parse(jsonData);
-      if (data.emails && Array.isArray(data.emails)) setEmails(data.emails);
-      if (data.services && Array.isArray(data.services)) setServices(data.services);
-      if (data.emailServices && Array.isArray(data.emailServices)) setEmailServices(data.emailServices);
-      if (data.history && Array.isArray(data.history)) setHistory(data.history);
-      if (data.settings) setSettings(data.settings);
+      const payload = {
+        emails: Array.isArray(data.emails) ? data.emails : [],
+        services: Array.isArray(data.services) ? data.services : [],
+        emailServices: Array.isArray(data.emailServices) ? data.emailServices : [],
+        history: Array.isArray(data.history) ? data.history : [],
+        settings: data.settings ?? DEFAULT_SETTINGS,
+      };
+
+      await api.loadMockData(payload);
+      await refreshFromServer();
       return true;
     } catch (e) {
       console.error('Error importing data', e);

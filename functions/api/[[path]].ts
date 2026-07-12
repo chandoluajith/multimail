@@ -508,9 +508,14 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         db.prepare('DELETE FROM usage_history WHERE userId=?').bind(userId),
         db.prepare('DELETE FROM email_services WHERE userId=?').bind(userId),
         db.prepare('DELETE FROM emails WHERE userId=?').bind(userId),
+        db.prepare('DELETE FROM services WHERE userId=?').bind(userId),
         db.prepare('DELETE FROM settings WHERE userId=?').bind(userId),
         // Re-insert with encrypted addresses
         ...emailStmts,
+        ...payload.services.map(s =>
+          db.prepare('INSERT OR REPLACE INTO services (id,userId,name,icon,color,isCustom,defaultCooldownValue,defaultCooldownUnit,autoStartCooldown,autoResetStatus,allowOverride) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+            .bind(s.id, s.isCustom ? userId : null, s.name, s.icon, s.color, fromBool(s.isCustom), s.defaultCooldownValue??null, s.defaultCooldownUnit??null, fromBool(s.autoStartCooldown), fromBool(s.autoResetStatus), fromBool(s.allowOverride))
+        ),
         ...payload.emailServices.map(es =>
           db.prepare('INSERT OR REPLACE INTO email_services (id,userId,emailId,serviceId,status,remainingRequests,maximumRequests,lastUsed,lastLimitReached,estimatedResetTime,estimatedResetDuration,notes,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
             .bind(es.id, userId, es.emailId, es.serviceId, es.status, es.remainingRequests??null, es.maximumRequests??null, es.lastUsed??null, es.lastLimitReached??null, es.estimatedResetTime??null, es.estimatedResetDuration??null, es.notes??null, es.createdAt, es.updatedAt)
@@ -529,6 +534,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         db.prepare('DELETE FROM usage_history WHERE userId=?').bind(userId),
         db.prepare('DELETE FROM email_services WHERE userId=?').bind(userId),
         db.prepare('DELETE FROM emails WHERE userId=?').bind(userId),
+        db.prepare('DELETE FROM services WHERE userId=?').bind(userId),
         db.prepare('DELETE FROM settings WHERE userId=?').bind(userId),
       ]);
       return new Response(JSON.stringify({ success: true }), { headers: h });

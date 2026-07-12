@@ -52,7 +52,7 @@ export const SettingsView: React.FC = () => {
  }
  };
 
- const handleImport = () => {
+ const handleImport = async () => {
  setImportError(null);
  setImportSuccess(false);
  if (!importJson.trim()) {
@@ -63,7 +63,7 @@ export const SettingsView: React.FC = () => {
  try {
  // Basic syntax validation
  JSON.parse(importJson);
- const success = importData(importJson);
+ const success = await importData(importJson);
  if (success) {
  setImportSuccess(true);
  setImportJson('');
@@ -76,19 +76,29 @@ export const SettingsView: React.FC = () => {
  }
  };
 
- const handleClearDb = () => {
+ const handleClearDb = async () => {
  if (window.confirm('Are you sure you want to clear all data? This will delete all emails, services, and history.')) {
- clearDatabase();
+ try {
+ await clearDatabase();
  setDbCleared(true);
  setTimeout(() => setDbCleared(false), 3000);
+ } catch (error) {
+ setImportError('Failed to clear the database. Please try again.');
+ console.error(error);
+ }
  }
  };
 
- const handleLoadMock = () => {
+ const handleLoadMock = async () => {
  if (window.confirm('This will append mock email accounts, services, and usage history. Continue?')) {
- loadMockData();
+ try {
+ await loadMockData();
  setMockLoaded(true);
  setTimeout(() => setMockLoaded(false), 3000);
+ } catch (error) {
+ setImportError('Failed to load mock data. Please try again.');
+ console.error(error);
+ }
  }
  };
 
