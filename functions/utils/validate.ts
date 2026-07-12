@@ -22,12 +22,12 @@ export class ValidationFailed extends Error {
 
 // ── Primitives ────────────────────────────────────────────────────────────────
 
-const UUID_RE    = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RECORD_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const EMAIL_RE   = /^[^\s@]{1,64}@[^\s@]{1,253}$/;           // RFC 5321 simplified
 const ISO_TS_RE  = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // ISO 8601 prefix
 
-function isUUID(v: unknown): v is string {
-  return typeof v === 'string' && UUID_RE.test(v);
+function isRecordId(v: unknown): v is string {
+  return typeof v === 'string' && RECORD_ID_RE.test(v);
 }
 function isEmail(v: unknown): v is string {
   return typeof v === 'string' && EMAIL_RE.test(v.trim()) && v.length <= 320;
@@ -77,7 +77,7 @@ export function validateEmailCreate(body: unknown): void {
   const e: ValidationError[] = [];
   const b = body as Record<string, unknown>;
 
-  if (!isUUID(b?.id))         e.push({ field: 'id',       message: 'Must be a valid UUID' });
+  if (!isRecordId(b?.id))     e.push({ field: 'id',       message: 'Must be a valid record ID' });
   if (!isEmail(b?.email))     e.push({ field: 'email',    message: 'Must be a valid email address (max 320 chars)' });
   if (!isString(b?.nickname, 100))
                               e.push({ field: 'nickname', message: 'Required, max 100 characters' });
@@ -112,7 +112,7 @@ export function validateServiceCreate(body: unknown): void {
   const e: ValidationError[] = [];
   const b = body as Record<string, unknown>;
 
-  if (!isUUID(b?.id))              e.push({ field: 'id',   message: 'Must be a valid UUID' });
+  if (!isRecordId(b?.id))          e.push({ field: 'id',   message: 'Must be a valid record ID' });
   if (!isString(b?.name, 100))     e.push({ field: 'name', message: 'Required, max 100 characters' });
   if (!isString(b?.icon, 100))     e.push({ field: 'icon', message: 'Required, max 100 characters' });
   if (!isString(b?.color, 20))     e.push({ field: 'color', message: 'Required, max 20 characters (e.g. #ff6b6b)' });
@@ -155,9 +155,9 @@ export function validateEmailServiceUpdate(body: unknown): void {
   const e: ValidationError[] = [];
   const b = body as Record<string, unknown>;
 
-  if (!isUUID(b?.id))        e.push({ field: 'id',     message: 'Must be a valid UUID' });
-  if (!isUUID(b?.emailId))   e.push({ field: 'emailId', message: 'Must be a valid UUID' });
-  if (!isUUID(b?.serviceId)) e.push({ field: 'serviceId', message: 'Must be a valid UUID' });
+  if (!isRecordId(b?.id))        e.push({ field: 'id',     message: 'Must be a valid record ID' });
+  if (!isRecordId(b?.emailId))   e.push({ field: 'emailId', message: 'Must be a valid record ID' });
+  if (!isRecordId(b?.serviceId)) e.push({ field: 'serviceId', message: 'Must be a valid record ID' });
   if (!isOneOf(b?.status, STATUS_VALUES))
                              e.push({ field: 'status', message: `Must be one of: ${STATUS_VALUES.join(', ')}` });
   if (!isOptPositiveInt(b?.remainingRequests))
@@ -185,8 +185,8 @@ export function validateHistoryCreate(body: unknown): void {
   const e: ValidationError[] = [];
   const b = body as Record<string, unknown>;
 
-  if (!isUUID(b?.id))            e.push({ field: 'id',        message: 'Must be a valid UUID' });
-  if (!isUUID(b?.emailServiceId))e.push({ field: 'emailServiceId', message: 'Must be a valid UUID' });
+  if (!isRecordId(b?.id))            e.push({ field: 'id',        message: 'Must be a valid record ID' });
+  if (!isRecordId(b?.emailServiceId))e.push({ field: 'emailServiceId', message: 'Must be a valid record ID' });
   if (!isString(b?.emailNickname, 100))
                                  e.push({ field: 'emailNickname', message: 'Required, max 100 characters' });
   if (!isEmail(b?.emailAddress)) e.push({ field: 'emailAddress', message: 'Must be a valid email address' });
