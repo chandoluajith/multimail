@@ -8,7 +8,6 @@ export const DEFAULT_SERVICES: Service[] = [
   { id: 'gemini', name: 'Gemini', icon: 'Sparkles', color: '#10B981', defaultCooldownValue: 1, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
   { id: 'claude', name: 'Claude', icon: 'Cpu', color: '#F59E0B', defaultCooldownValue: 3, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
   { id: 'codex', name: 'Codex', icon: 'Code2', color: '#6366F1', defaultCooldownValue: 24, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
-  { id: 'antigravity', name: 'Antigravity', icon: 'Compass', color: '#EC4899', defaultCooldownValue: 4, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
   { id: 'cursor', name: 'Cursor', icon: 'MousePointerClick', color: '#3B82F6', defaultCooldownValue: 2, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
   { id: 'windsurf', name: 'Windsurf', icon: 'Wind', color: '#06B6D4', defaultCooldownValue: 12, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
   { id: 'openai', name: 'OpenAI', icon: 'Layers', color: '#8B5CF6', defaultCooldownValue: 4, defaultCooldownUnit: 'hours', autoStartCooldown: true, autoResetStatus: true, allowOverride: true },
@@ -84,17 +83,6 @@ export const MOCK_EMAIL_SERVICES: EmailService[] = [
     estimatedResetDuration: 24 * 60 * 60 * 1000, // 24 hours total
     createdAt: getPastTime(10080),
     updatedAt: getPastTime(300),
-  },
-  {
-    id: 'email_1_antigravity',
-    emailId: 'email_1',
-    serviceId: 'antigravity',
-    status: 'Available',
-    remainingRequests: 25,
-    maximumRequests: 25,
-    lastUsed: getPastTime(120),
-    createdAt: getPastTime(10080),
-    updatedAt: getPastTime(120),
   },
 
   // Email 2 Services

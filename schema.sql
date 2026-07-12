@@ -138,7 +138,6 @@ INSERT INTO services (id, userId, name, icon, color, isCustom, defaultCooldownVa
 ('gemini',      NULL, 'Gemini',    'Sparkles',          '#10B981', 0, 1,  'hours', 1, 1, 1),
 ('claude',      NULL, 'Claude',    'Cpu',               '#F59E0B', 0, 3,  'hours', 1, 1, 1),
 ('codex',       NULL, 'Codex',     'Code2',             '#6366F1', 0, 24, 'hours', 1, 1, 1),
-('antigravity', NULL, 'Antigravity','Compass',          '#EC4899', 0, 4,  'hours', 1, 1, 1),
 ('cursor',      NULL, 'Cursor',    'MousePointerClick', '#3B82F6', 0, 2,  'hours', 1, 1, 1),
 ('windsurf',    NULL, 'Windsurf',  'Wind',              '#06B6D4', 0, 12, 'hours', 1, 1, 1),
 ('openai',      NULL, 'OpenAI',    'Layers',            '#8B5CF6', 0, 4,  'hours', 1, 1, 1),
