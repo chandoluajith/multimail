@@ -13,12 +13,12 @@ interface AppContextType {
   settings: AppSettings;
   isLoading: boolean;
   dbStatus: DbStatus;
-  addEmail: (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => void;
-  deleteEmail: (id: string) => void;
-  updateEmail: (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => void;
-  addService: (name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => void;
-  deleteService: (id: string) => void;
-  updateService: (id: string, name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => void;
+  addEmail: (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => Promise<void>;
+  deleteEmail: (id: string) => Promise<void>;
+  updateEmail: (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => Promise<void>;
+  addService: (name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => Promise<void>;
+  deleteService: (id: string) => Promise<void>;
+  updateService: (id: string, name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => Promise<void>;
   updateStatus: (
     emailId: string,
     serviceId: string,
@@ -28,15 +28,15 @@ interface AppContextType {
     maximumRequests?: number,
     notes?: string,
     overrideResetTime?: string
-  ) => void;
-  startSession: (emailId: string, serviceId: string) => void;
-  endSession: (emailId: string, serviceId: string, notes?: string) => void;
-  reachLimit: (emailId: string, serviceId: string, cooldownMinutes?: number, notes?: string) => void;
-  resetTimer: (emailId: string, serviceId: string) => void;
+  ) => Promise<void>;
+  startSession: (emailId: string, serviceId: string) => Promise<void>;
+  endSession: (emailId: string, serviceId: string, notes?: string) => Promise<void>;
+  reachLimit: (emailId: string, serviceId: string, cooldownMinutes?: number, notes?: string) => Promise<void>;
+  resetTimer: (emailId: string, serviceId: string) => Promise<void>;
   loadMockData: () => Promise<void>;
   clearDatabase: () => Promise<void>;
   clearHistory: () => Promise<void>;
-  updateSettings: (newSettings: Partial<AppSettings>) => void;
+  updateSettings: (newSettings: Partial<AppSettings>) => Promise<void>;
   exportData: () => string;
   importData: (jsonData: string) => Promise<boolean>;
 }
@@ -211,7 +211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  const addEmail = (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => {
+  const addEmail = async (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => {
     const now = new Date().toISOString();
     const newEmail: Email = {
       id: `email_${Math.random().toString(36).substring(2, 11)}`,
@@ -231,43 +231,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEmails((prev) => [...prev, newEmail]);
     setEmailServices((prev) => [...prev, ...newRelations]);
 
-    // Persist to D1
-    api.createEmail(newEmail).catch(console.error);
-    if (newRelations.length > 0) api.saveEmailServices(newRelations).catch(console.error);
-  };
-
-  const deleteEmail = (id: string) => {
-    setEmails((prev) => prev.filter((e) => e.id !== id));
-    setEmailServices((prev) => prev.filter((es) => es.emailId !== id));
-    api.deleteEmail(id).catch(console.error);
-  };
-
-  const updateEmail = (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => {
-    const now = new Date().toISOString();
-    setEmails((prev) => prev.map((e) => (e.id === id ? { ...e, email, nickname, provider, updatedAt: now } : e)));
-    api.updateEmail(id, { email, nickname, provider, updatedAt: now }).catch(console.error);
-
-    if (serviceIds != null) {
-      setEmailServices((prev) => {
-        const others = prev.filter((es) => es.emailId !== id);
-        const desired = serviceIds.map((sid) => {
-          const existing = prev.find((es) => es.emailId === id && es.serviceId === sid);
-          if (existing) return { ...existing, updatedAt: now };
-          return { id: `${id}_${sid}`, emailId: id, serviceId: sid, status: settings.defaultStatus, createdAt: now, updatedAt: now };
-        });
-
-        // Compute orphans to remove
-        const currentSids = prev.filter((es) => es.emailId === id).map((es) => es.serviceId);
-        const orphanSids = currentSids.filter((sid) => !serviceIds.includes(sid));
-        if (orphanSids.length > 0) api.deleteOrphanEmailServices(id, orphanSids).catch(console.error);
-
-        api.saveEmailServices(desired).catch(console.error);
-        return [...others, ...desired];
-      });
+    try {
+      await api.createEmail(newEmail);
+      if (newRelations.length > 0) await api.saveEmailServices(newRelations);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to add email', error);
+      await refreshFromServer();
     }
   };
 
-  const addService = (name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => {
+  const deleteEmail = async (id: string) => {
+    setEmails((prev) => prev.filter((e) => e.id !== id));
+    setEmailServices((prev) => prev.filter((es) => es.emailId !== id));
+    try {
+      await api.deleteEmail(id);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to delete email', error);
+      await refreshFromServer();
+    }
+  };
+
+  const updateEmail = async (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => {
+    const now = new Date().toISOString();
+    setEmails((prev) => prev.map((e) => (e.id === id ? { ...e, email, nickname, provider, updatedAt: now } : e)));
+
+    if (serviceIds != null) {
+      const currentRelations = emailServices.filter((es) => es.emailId === id);
+      const desired = serviceIds.map((sid) => {
+        const existing = currentRelations.find((es) => es.serviceId === sid);
+        if (existing) return { ...existing, updatedAt: now };
+        return { id: `${id}_${sid}`, emailId: id, serviceId: sid, status: settings.defaultStatus, createdAt: now, updatedAt: now };
+      });
+      const orphanSids = currentRelations.map((es) => es.serviceId).filter((sid) => !serviceIds.includes(sid));
+      setEmailServices((prev) => [...prev.filter((es) => es.emailId !== id), ...desired]);
+
+      try {
+        await api.updateEmail(id, { email, nickname, provider, updatedAt: now });
+        if (orphanSids.length > 0) await api.deleteOrphanEmailServices(id, orphanSids);
+        await api.saveEmailServices(desired);
+        await refreshFromServer();
+      } catch (error) {
+        console.error('Failed to update email', error);
+        await refreshFromServer();
+      }
+      return;
+    }
+
+    try {
+      await api.updateEmail(id, { email, nickname, provider, updatedAt: now });
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to update email', error);
+      await refreshFromServer();
+    }
+  };
+
+  const addService = async (name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => {
     const now = new Date().toISOString();
     const newService: Service = {
       id: `srv_${Math.random().toString(36).substring(2, 11)}`,
@@ -291,23 +312,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setServices((prev) => [...prev, newService]);
     setEmailServices((prev) => [...prev, ...newRelations]);
 
-    api.createService(newService).catch(console.error);
-    if (newRelations.length > 0) api.saveEmailServices(newRelations).catch(console.error);
+    try {
+      await api.createService(newService);
+      if (newRelations.length > 0) await api.saveEmailServices(newRelations);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to add service', error);
+      await refreshFromServer();
+    }
   };
 
-  const deleteService = (id: string) => {
+  const deleteService = async (id: string) => {
     setServices((prev) => prev.filter((s) => s.id !== id));
     setEmailServices((prev) => prev.filter((es) => es.serviceId !== id));
-    api.deleteService(id).catch(console.error);
+    try {
+      await api.deleteService(id);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to delete service', error);
+      await refreshFromServer();
+    }
   };
 
-  const updateService = (id: string, name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => {
+  const updateService = async (id: string, name: string, icon: string, color: string, cooldownPolicy?: { defaultCooldownValue?: number; defaultCooldownUnit?: CooldownUnit; autoStartCooldown?: boolean; autoResetStatus?: boolean; allowOverride?: boolean }) => {
     setServices((prev) => prev.map((s) => s.id === id ? {
       ...s, name, icon, color,
       ...(cooldownPolicy ? cooldownPolicy : {}),
     } : s));
 
-    api.updateService(id, { name, icon, color, ...cooldownPolicy }).catch(console.error);
+    try {
+      await api.updateService(id, { name, icon, color, ...cooldownPolicy });
+    } catch (error) {
+      console.error('Failed to update service', error);
+      await refreshFromServer();
+      return;
+    }
 
     // Propagate cooldown changes to active cooldowns
     if (cooldownPolicy?.defaultCooldownValue && cooldownPolicy?.defaultCooldownUnit) {
@@ -323,33 +362,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })();
       const newDurationMs = newMinutes * 60 * 1000;
 
-      setEmailServices((prev) => {
-        const updated = prev.map((es) => {
-          if (es.serviceId !== id) return es;
-          if (es.status !== 'Cooling Down' && es.status !== 'Limit Reached') return es;
-          if (!es.estimatedResetTime) return es;
+      const updatedRelations = emailServices.map((es) => {
+        if (es.serviceId !== id) return es;
+        if (es.status !== 'Cooling Down' && es.status !== 'Limit Reached') return es;
+        if (!es.estimatedResetTime) return es;
 
-          const resetTime = new Date(es.estimatedResetTime).getTime();
-          const originalDuration = es.estimatedResetDuration || (settings.defaultCooldownDuration * 60 * 60 * 1000);
-          const startTime = resetTime - originalDuration;
-          const newResetTime = new Date(startTime + newDurationMs);
-          const now = new Date();
+        const resetTime = new Date(es.estimatedResetTime).getTime();
+        const originalDuration = es.estimatedResetDuration || (settings.defaultCooldownDuration * 60 * 60 * 1000);
+        const startTime = resetTime - originalDuration;
+        const newResetTime = new Date(startTime + newDurationMs);
+        const now = new Date();
 
-          if (newResetTime <= now) {
-            const res: EmailService = { ...es, status: 'Available', remainingRequests: es.maximumRequests, estimatedResetTime: undefined, estimatedResetDuration: undefined, updatedAt: now.toISOString() };
-            api.updateEmailService(res).catch(console.error);
-            return res;
-          }
-          const res: EmailService = { ...es, estimatedResetTime: newResetTime.toISOString(), estimatedResetDuration: newDurationMs, updatedAt: now.toISOString() };
-          api.updateEmailService(res).catch(console.error);
-          return res;
-        });
-        return updated;
+        if (newResetTime <= now) {
+          return { ...es, status: 'Available' as StatusType, remainingRequests: es.maximumRequests, estimatedResetTime: undefined, estimatedResetDuration: undefined, updatedAt: now.toISOString() };
+        }
+        return { ...es, estimatedResetTime: newResetTime.toISOString(), estimatedResetDuration: newDurationMs, updatedAt: now.toISOString() };
       });
+      setEmailServices(updatedRelations);
+
+      try {
+        await Promise.all(updatedRelations.filter((es) => es.serviceId === id && (es.status === 'Available' || es.status === 'Cooling Down' || es.status === 'Limit Reached')).map((es) => api.updateEmailService(es)));
+        await refreshFromServer();
+      } catch (error) {
+        console.error('Failed to propagate service cooldown changes', error);
+        await refreshFromServer();
+      }
     }
+
+    await refreshFromServer();
   };
 
-  const updateStatus = (
+  const updateStatus = async (
     emailId: string, serviceId: string, status: StatusType,
     cooldownMinutes?: number, remainingRequests?: number, maximumRequests?: number,
     notes?: string, overrideResetTime?: string
@@ -372,39 +415,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       estimatedResetDuration = cooldownMinutes * 60 * 1000;
     }
 
-    setEmailServices((prev) => prev.map((es) => {
-      if (es.emailId === emailId && es.serviceId === serviceId) {
-        const originalStatus = es.status;
-        if (originalStatus !== status) {
-          const historyRecord: UsageHistory = {
-            id: `hist_${Math.random().toString(36).substring(2, 11)}`,
-            emailServiceId: es.id,
-            emailNickname: nickname, emailAddress: emailAddr, serviceName: servName,
-            event: status === 'Limit Reached' ? 'Reached Limit' : 'Status Changed',
-            timestamp: now.toISOString(),
-            notes: notes || `Manual status update: ${originalStatus} ➔ ${status}${cooldownMinutes ? ` (${cooldownMinutes}m cooldown)` : ''}`,
-          };
-          setHistory((h) => [historyRecord, ...h]);
-          api.createHistory(historyRecord).catch(console.error);
-          if (status === 'Limit Reached') playSound('limit');
-        }
-        const updated: EmailService = {
-          ...es, status,
-          remainingRequests: remainingRequests !== undefined ? remainingRequests : es.remainingRequests,
-          maximumRequests: maximumRequests !== undefined ? maximumRequests : es.maximumRequests,
-          estimatedResetTime, estimatedResetDuration,
-          lastLimitReached: status === 'Limit Reached' || status === 'Cooling Down' ? now.toISOString() : es.lastLimitReached,
-          notes: notes || es.notes,
-          updatedAt: now.toISOString(),
-        };
-        api.updateEmailService(updated).catch(console.error);
-        return updated;
+    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
+    if (!current) return;
+
+    const updated: EmailService = {
+      ...current, status,
+      remainingRequests: remainingRequests !== undefined ? remainingRequests : current.remainingRequests,
+      maximumRequests: maximumRequests !== undefined ? maximumRequests : current.maximumRequests,
+      estimatedResetTime, estimatedResetDuration,
+      lastLimitReached: status === 'Limit Reached' || status === 'Cooling Down' ? now.toISOString() : current.lastLimitReached,
+      notes: notes || current.notes,
+      updatedAt: now.toISOString(),
+    };
+
+    const historyRecord = current.status !== status ? {
+      id: `hist_${Math.random().toString(36).substring(2, 11)}`,
+      emailServiceId: current.id,
+      emailNickname: nickname,
+      emailAddress: emailAddr,
+      serviceName: servName,
+      event: status === 'Limit Reached' ? 'Reached Limit' : 'Status Changed',
+      timestamp: now.toISOString(),
+      notes: notes || `Manual status update: ${current.status} ➔ ${status}${cooldownMinutes ? ` (${cooldownMinutes}m cooldown)` : ''}`,
+    } as UsageHistory : null;
+
+    setEmailServices((prev) => prev.map((es) => (es.emailId === emailId && es.serviceId === serviceId ? updated : es)));
+
+    try {
+      if (historyRecord) {
+        setHistory((h) => [historyRecord, ...h]);
+        await api.createHistory(historyRecord);
+        if (status === 'Limit Reached') playSound('limit');
       }
-      return es;
-    }));
+      await api.updateEmailService(updated);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to update status', error);
+      await refreshFromServer();
+    }
   };
 
-  const startSession = (emailId: string, serviceId: string) => {
+  const startSession = async (emailId: string, serviceId: string) => {
     const now = new Date();
     const emailObj = emails.find((e) => e.id === emailId);
     const serviceObj = services.find((s) => s.id === serviceId);
@@ -412,30 +463,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const emailAddr = emailObj?.email ?? 'unknown';
     const servName = serviceObj?.name ?? 'Service';
 
-    setEmailServices((prev) => prev.map((es) => {
-      if (es.emailId === emailId && es.serviceId === serviceId) {
-        const newRemaining = es.remainingRequests !== undefined && es.remainingRequests > 0
-          ? es.remainingRequests - 1 : es.remainingRequests;
-        const historyRecord: UsageHistory = {
-          id: `hist_${Math.random().toString(36).substring(2, 11)}`,
-          emailServiceId: es.id,
-          emailNickname: nickname, emailAddress: emailAddr, serviceName: servName,
-          event: 'Started Session',
-          timestamp: now.toISOString(),
-          notes: `Started usage session. ${newRemaining !== undefined ? `Remaining: ${newRemaining}` : ''}`,
-        };
-        setHistory((h) => [historyRecord, ...h]);
-        api.createHistory(historyRecord).catch(console.error);
+    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
+    if (!current) return;
 
-        const updated: EmailService = { ...es, lastUsed: now.toISOString(), remainingRequests: newRemaining, updatedAt: now.toISOString() };
-        api.updateEmailService(updated).catch(console.error);
-        return updated;
-      }
-      return es;
-    }));
+    const newRemaining = current.remainingRequests !== undefined && current.remainingRequests > 0
+      ? current.remainingRequests - 1 : current.remainingRequests;
+    const updated: EmailService = { ...current, lastUsed: now.toISOString(), remainingRequests: newRemaining, updatedAt: now.toISOString() };
+    const historyRecord: UsageHistory = {
+      id: `hist_${Math.random().toString(36).substring(2, 11)}`,
+      emailServiceId: current.id,
+      emailNickname: nickname,
+      emailAddress: emailAddr,
+      serviceName: servName,
+      event: 'Started Session',
+      timestamp: now.toISOString(),
+      notes: `Started usage session. ${newRemaining !== undefined ? `Remaining: ${newRemaining}` : ''}`,
+    };
+
+    setEmailServices((prev) => prev.map((es) => (es.emailId === emailId && es.serviceId === serviceId ? updated : es)));
+    setHistory((h) => [historyRecord, ...h]);
+
+    try {
+      await api.createHistory(historyRecord);
+      await api.updateEmailService(updated);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to start session', error);
+      await refreshFromServer();
+    }
   };
 
-  const endSession = (emailId: string, serviceId: string, notes?: string) => {
+  const endSession = async (emailId: string, serviceId: string, notes?: string) => {
     const now = new Date();
     const emailObj = emails.find((e) => e.id === emailId);
     const serviceObj = services.find((s) => s.id === serviceId);
@@ -450,48 +508,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notes: notes || 'Session completed.',
     };
     setHistory((h) => [historyRecord, ...h]);
-    api.createHistory(historyRecord).catch(console.error);
+    try {
+      await api.createHistory(historyRecord);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to end session', error);
+      await refreshFromServer();
+    }
   };
 
-  const reachLimit = (emailId: string, serviceId: string, cooldownMinutes?: number, notes?: string) => {
+  const reachLimit = async (emailId: string, serviceId: string, cooldownMinutes?: number, notes?: string) => {
     const minutes = cooldownMinutes || getServiceCooldownMinutes(serviceId);
-    updateStatus(emailId, serviceId, 'Limit Reached', minutes, 0, undefined, notes || `Usage limit exceeded. Cooldown timer set for ${minutes} minutes.`);
+    await updateStatus(emailId, serviceId, 'Limit Reached', minutes, 0, undefined, notes || `Usage limit exceeded. Cooldown timer set for ${minutes} minutes.`);
   };
 
-  const resetTimer = (emailId: string, serviceId: string) => {
+  const resetTimer = async (emailId: string, serviceId: string) => {
     const now = new Date();
     const emailObj = emails.find((e) => e.id === emailId);
     const serviceObj = services.find((s) => s.id === serviceId);
 
-    setEmailServices((prev) => prev.map((es) => {
-      if (es.emailId === emailId && es.serviceId === serviceId) {
-        const wasLimited = es.status === 'Limit Reached' || es.status === 'Cooling Down';
-        if (wasLimited) {
-          const historyRecord: UsageHistory = {
-            id: `hist_${Math.random().toString(36).substring(2, 11)}`,
-            emailServiceId: es.id,
-            emailNickname: emailObj?.nickname ?? 'Account',
-            emailAddress: emailObj?.email ?? 'unknown',
-            serviceName: serviceObj?.name ?? 'Service',
-            event: 'Reset Completed',
-            timestamp: now.toISOString(),
-            notes: 'Timer manually reset. Status changed to Available.',
-          };
-          setHistory((h) => [historyRecord, ...h]);
-          api.createHistory(historyRecord).catch(console.error);
-        }
-        const updated: EmailService = {
-          ...es, status: 'Available' as StatusType,
-          remainingRequests: es.maximumRequests,
-          estimatedResetTime: undefined,
-          estimatedResetDuration: undefined,
-          updatedAt: now.toISOString(),
-        };
-        api.updateEmailService(updated).catch(console.error);
-        return updated;
-      }
-      return es;
-    }));
+    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
+    if (!current) return;
+
+    const updated: EmailService = {
+      ...current, status: 'Available' as StatusType,
+      remainingRequests: current.maximumRequests,
+      estimatedResetTime: undefined,
+      estimatedResetDuration: undefined,
+      updatedAt: now.toISOString(),
+    };
+    const wasLimited = current.status === 'Limit Reached' || current.status === 'Cooling Down';
+    const historyRecord = wasLimited ? {
+      id: `hist_${Math.random().toString(36).substring(2, 11)}`,
+      emailServiceId: current.id,
+      emailNickname: emailObj?.nickname ?? 'Account',
+      emailAddress: emailObj?.email ?? 'unknown',
+      serviceName: serviceObj?.name ?? 'Service',
+      event: 'Reset Completed',
+      timestamp: now.toISOString(),
+      notes: 'Timer manually reset. Status changed to Available.',
+    } as UsageHistory : null;
+
+    setEmailServices((prev) => prev.map((es) => (es.emailId === emailId && es.serviceId === serviceId ? updated : es)));
+    if (historyRecord) setHistory((h) => [historyRecord, ...h]);
+
+    try {
+      if (historyRecord) await api.createHistory(historyRecord);
+      await api.updateEmailService(updated);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to reset timer', error);
+      await refreshFromServer();
+    }
   };
 
   const loadMockData = async () => {
@@ -530,16 +598,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const updateSettings = (newSettings: Partial<AppSettings>) => {
+  const updateSettings = async (newSettings: Partial<AppSettings>) => {
     const merged: AppSettings = {
       ...settings,
       ...newSettings,
       notifications: { ...settings.notifications, ...(newSettings.notifications || {}) },
     };
     setSettings(merged);
-    api.saveSettings(merged)
-      .then(() => refreshFromServer())
-      .catch((error) => console.error('Failed to save settings', error));
+    try {
+      await api.saveSettings(merged);
+      await refreshFromServer();
+    } catch (error) {
+      console.error('Failed to save settings', error);
+      await refreshFromServer();
+    }
   };
 
   const exportData = () => JSON.stringify({ emails, services, emailServices, history, settings, version: '1.0.0' }, null, 2);
