@@ -1,36 +1,125 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MailsTracker
 
-## Getting Started
+Multi-account email usage tracker with AI service cooldown management.  
+Built with **React + Vite** (frontend) and **Cloudflare Pages Functions + D1** (backend).
 
-First, run the development server:
+---
+
+## Quick Start (Local Development)
+
+### 1. Install dependencies
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Create your local environment file
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cp .dev.vars.example .dev.vars
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Then edit `.dev.vars` and fill in your **real** values:
 
-## Learn More
+| Variable               | How to get it                                            |
+| ---------------------- | -------------------------------------------------------- |
+| `JWT_SECRET`           | Run: `openssl rand -base64 48`                           |
+| `ENCRYPT_SECRET`       | Run: `openssl rand -hex 32`                              |
+| `GOOGLE_CLIENT_ID`     | Google Cloud Console → APIs → OAuth 2.0 Credentials      |
+| `GOOGLE_CLIENT_SECRET` | Same as above                                            |
+| `APP_URL`              | `http://localhost:5173` for local dev                    |
 
-To learn more about Next.js, take a look at the following resources:
+> **Important**: The app will return **503 Server Misconfiguration** if secrets are still set to the example placeholder values.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 3. Initialize the local database
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run db:init
+```
 
-## Deploy on Vercel
+### 4. Start the development servers
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run dev:all
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This starts two servers concurrently:
+- **Vite** dev server on `http://localhost:5173` (frontend hot reload)
+- **Wrangler** Pages dev server on `http://localhost:8788` (API + D1)
+
+The frontend proxies API calls (`/api/*`) to the Wrangler worker automatically.
+
+---
+
+## Available Scripts
+
+| Script           | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `npm run dev`    | Start Vite frontend only                         |
+| `npm run dev:all`| Start both Vite + Wrangler concurrently          |
+| `npm run build`  | TypeScript check + Vite production build         |
+| `npm run db:init`| Seed the local D1 database from `schema.sql`     |
+| `npm run lint`   | Run ESLint                                       |
+
+---
+
+## Production Deployment (Cloudflare Pages)
+
+### 1. Set your real D1 database ID
+
+In `wrangler.toml`, replace `local-dev-db` with your actual D1 database ID:
+
+```bash
+# Find your database ID:
+npx wrangler d1 list
+```
+
+### 2. Sync the production schema
+
+```bash
+npx wrangler d1 execute mailstracker-db --remote --file=./schema.sql
+```
+
+### 3. Set secrets in Cloudflare
+
+```bash
+npx wrangler pages secret put JWT_SECRET
+npx wrangler pages secret put ENCRYPT_SECRET
+npx wrangler pages secret put GOOGLE_CLIENT_ID
+npx wrangler pages secret put GOOGLE_CLIENT_SECRET
+npx wrangler pages secret put APP_URL
+```
+
+### 4. Deploy
+
+```bash
+npm run build
+npx wrangler pages deploy dist
+```
+
+---
+
+## Project Structure
+
+```
+├── src/                  # React frontend (Vite)
+│   ├── components/       # UI components
+│   ├── services/api.ts   # API client
+│   └── types.ts          # Shared TypeScript types
+├── functions/            # Cloudflare Pages Functions (backend)
+│   ├── api/              # API route handlers
+│   ├── utils/            # Security, auth, crypto, logging
+│   ├── types.ts          # Backend type definitions
+│   └── _middleware.ts    # Global middleware (HTTPS, headers)
+├── schema.sql            # D1 database schema
+├── wrangler.toml         # Cloudflare configuration
+└── .dev.vars.example     # Template for local secrets
+```
+
+## Tech Stack
+
+- **Frontend**: React 19, Vite, Tailwind CSS 4, Framer Motion
+- **Backend**: Cloudflare Pages Functions (Workers runtime)
+- **Database**: Cloudflare D1 (SQLite)
+- **Auth**: Google OAuth 2.0, JWT sessions
+- **Encryption**: AES-256-GCM (Web Crypto API)

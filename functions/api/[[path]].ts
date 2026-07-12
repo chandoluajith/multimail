@@ -1,4 +1,4 @@
-import { Email, Service, EmailService, UsageHistory, AppSettings, StatusType, CooldownUnit } from '../../src/types';
+import { Email, Service, EmailService, UsageHistory, AppSettings, StatusType, CooldownUnit } from '../types';
 import { encryptEmail, safeDecryptEmail } from '../utils/emailCrypto';
 import {
   ValidationFailed,

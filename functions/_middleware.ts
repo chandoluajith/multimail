@@ -41,8 +41,9 @@ interface ValidationResult {
  */
 function validateSecrets(env: Env): ValidationResult {
   const errors: string[] = [];
+  const isLocalDev = env.APP_URL?.includes('localhost') || env.APP_URL?.includes('127.0.0.1');
 
-  // JWT_SECRET — signs all session tokens
+  // JWT_SECRET — signs all session tokens (always required)
   if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
     errors.push('JWT_SECRET must be at least 32 characters');
   }
@@ -53,13 +54,15 @@ function validateSecrets(env: Env): ValidationResult {
   }
 
   // GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — OAuth 2.0
-  // Not required for non-OAuth routes, but we validate presence so
-  // a deployment without them fails loudly rather than silently.
-  if (!env.GOOGLE_CLIENT_ID) {
-    errors.push('GOOGLE_CLIENT_ID is not set');
-  }
-  if (!env.GOOGLE_CLIENT_SECRET) {
-    errors.push('GOOGLE_CLIENT_SECRET is not set');
+  // Required in production so a deployment without them fails loudly.
+  // In local dev, the app can start without them (OAuth just won't work).
+  if (!isLocalDev) {
+    if (!env.GOOGLE_CLIENT_ID) {
+      errors.push('GOOGLE_CLIENT_ID is not set');
+    }
+    if (!env.GOOGLE_CLIENT_SECRET) {
+      errors.push('GOOGLE_CLIENT_SECRET is not set');
+    }
   }
 
   return { ok: errors.length === 0, errors };
