@@ -2,8 +2,11 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { Email, Service, EmailService, UsageHistory, AppSettings, StatusType, ProviderType, CooldownUnit } from '../types';
 import { DEFAULT_SERVICES, DEFAULT_SETTINGS, MOCK_EMAILS, MOCK_EMAIL_SERVICES, MOCK_HISTORY } from '../mockData';
 import { api } from '../services/api';
+import { useAuth } from './AuthContext';
+import { useTheme } from './ThemeContext';
 
 type DbStatus = 'checking' | 'connected' | 'error';
+type AppData = Awaited<ReturnType<typeof api.getAllData>>;
 
 interface AppContextType {
   emails: Email[];
@@ -13,6 +16,7 @@ interface AppContextType {
   settings: AppSettings;
   isLoading: boolean;
   dbStatus: DbStatus;
+  syncError: string | null;
   addEmail: (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => Promise<void>;
   deleteEmail: (id: string) => Promise<void>;
   updateEmail: (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => Promise<void>;
@@ -44,6 +48,8 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, isAuthLoading } = useAuth();
+  const { setTheme } = useTheme();
   const [emails, setEmails] = useState<Email[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [emailServices, setEmailServices] = useState<EmailService[]>([]);
@@ -52,14 +58,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
+  const [syncError, setSyncError] = useState<string | null>(null);
 
-  const refreshFromServer = useCallback(async () => {
-    const data = await api.getAllData();
+  const applyServerData = useCallback((data: AppData) => {
+    const serverSettings = data.settings ?? DEFAULT_SETTINGS;
     setEmails(data.emails);
     setServices(data.services.length > 0 ? data.services : DEFAULT_SERVICES);
     setEmailServices(data.emailServices);
     setHistory(data.history);
-    setSettings(data.settings);
+    setSettings(serverSettings);
+    setTheme(serverSettings.theme);
+  }, [setTheme]);
+
+  const resetClientData = useCallback(() => {
+    setEmails([]);
+    setServices([]);
+    setEmailServices([]);
+    setHistory([]);
+    setSettings(DEFAULT_SETTINGS);
+    setTheme(DEFAULT_SETTINGS.theme);
+    setSyncError(null);
+  }, [setTheme]);
+
+  const refreshFromServer = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await api.getAllData();
+      applyServerData(data);
+      setDbStatus('connected');
+      setSyncError(null);
+    } catch (error) {
+      setDbStatus('error');
+      setSyncError(error instanceof Error ? error.message : 'Database sync failed');
+      throw error;
+    }
+  }, [applyServerData, user]);
+
+  const reportSyncFailure = useCallback((fallbackMessage: string, error: unknown) => {
+    console.error(fallbackMessage, error);
+    setDbStatus('error');
+    setSyncError(error instanceof Error ? error.message : fallbackMessage);
   }, []);
 
   // ── Sound effects ─────────────────────────────────────────────────────────
@@ -108,32 +146,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // ── Load initial data from D1 API ─────────────────────────────────────────
   // NOTE: We intentionally do NOT cache sensitive data (email addresses) in
-  // localStorage. Doing so would bypass AES-256-GCM encryption on the server
-  // and expose plaintext addresses to any script running on the page.
-  // The server is the single source of truth.
+  // local browser storage. Doing so would bypass AES-256-GCM encryption on the
+  // server and expose plaintext addresses to any script running on the page.
+  // The D1 database is the single source of truth.
   useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
+      if (isAuthLoading) return;
+
+      if (!user) {
+        resetClientData();
+        setDbStatus('checking');
+        setIsLoading(false);
+        setMounted(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setMounted(false);
+      setDbStatus('checking');
+      setSyncError(null);
+
       try {
-        await refreshFromServer();
+        const data = await api.getAllData();
+        if (cancelled) return;
+        applyServerData(data);
         setDbStatus('connected');
       } catch (err) {
+        if (cancelled) return;
         // Surface the error to the UI — do NOT silently fall back to stale or
         // mock data, as that could show one user another's placeholder records.
         console.error('[AppContext] Failed to load data from API:', err);
         setDbStatus('error');
+        setSyncError(err instanceof Error ? err.message : 'Database sync failed');
       } finally {
+        if (cancelled) return;
         setIsLoading(false);
-        setMounted(true);
+        setMounted(Boolean(user));
       }
     };
+
     load();
-  }, [refreshFromServer]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyServerData, isAuthLoading, resetClientData, user]);
 
   // ── Refs for background timer ─────────────────────────────────────────────
   const emailsRef = useRef(emails);
   const servicesRef = useRef(services);
   const emailServicesRef = useRef(emailServices);
   const settingsRef = useRef(settings);
+  const syncExpiredInFlightRef = useRef(false);
 
   useEffect(() => { emailsRef.current = emails; }, [emails]);
   useEffect(() => { servicesRef.current = services; }, [services]);
@@ -145,55 +211,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const timer = setInterval(() => {
       if (!mounted) return;
       const now = new Date();
-      let hasChanges = false;
 
-      const updatedList = emailServicesRef.current.map((es) => {
-        if (es.estimatedResetTime && (es.status === 'Cooling Down' || es.status === 'Limit Reached')) {
-          if (now >= new Date(es.estimatedResetTime)) {
-            hasChanges = true;
-            const emailObj = emailsRef.current.find((e) => e.id === es.emailId);
-            const serviceObj = servicesRef.current.find((s) => s.id === es.serviceId);
-            const nickname = emailObj?.nickname ?? 'Account';
-            const emailAddr = emailObj?.email ?? 'unknown';
-            const servName = serviceObj?.name ?? 'Service';
+      const expired = emailServicesRef.current.filter((es) =>
+        es.estimatedResetTime &&
+        (es.status === 'Cooling Down' || es.status === 'Limit Reached') &&
+        now >= new Date(es.estimatedResetTime)
+      );
 
-            const newHistory: UsageHistory = {
-              id: `hist_auto_${Math.random().toString(36).substring(2, 11)}`,
-              emailServiceId: es.id,
-              emailNickname: nickname,
-              emailAddress: emailAddr,
-              serviceName: servName,
-              event: 'Reset Completed',
-              timestamp: now.toISOString(),
-              notes: 'Cooldown period expired. Automatically reset.',
-            };
-            setHistory((prev) => [newHistory, ...prev]);
-            api.createHistory(newHistory).catch(console.error);
+      if (expired.length === 0 || syncExpiredInFlightRef.current) return;
+      syncExpiredInFlightRef.current = true;
 
-            if (settingsRef.current.notifications.cooldownFinished) {
-              triggerNotification(`⚡ ${servName} Ready!`, `Account ${nickname} (${emailAddr}) cooldown finished.`, 'complete');
-            }
-
-            const updated: EmailService = {
-              ...es,
-              status: 'Available' as StatusType,
-              remainingRequests: es.maximumRequests,
-              estimatedResetTime: undefined,
-              estimatedResetDuration: undefined,
-              updatedAt: now.toISOString(),
-            };
-            api.updateEmailService(updated).catch(console.error);
-            return updated;
+      api.syncExpiredCooldowns()
+        .then(async () => {
+          if (settingsRef.current.notifications.cooldownFinished) {
+            expired.forEach((es) => {
+              const emailObj = emailsRef.current.find((e) => e.id === es.emailId);
+              const serviceObj = servicesRef.current.find((s) => s.id === es.serviceId);
+              const nickname = emailObj?.nickname ?? 'Account';
+              const emailAddr = emailObj?.email ?? 'unknown';
+              const servName = serviceObj?.name ?? 'Service';
+              triggerNotification(`${servName} Ready`, `Account ${nickname} (${emailAddr}) cooldown finished.`, 'complete');
+            });
           }
-        }
-        return es;
-      });
-
-      if (hasChanges) setEmailServices(updatedList);
+          await refreshFromServer();
+        })
+        .catch((error) => {
+          console.error('Failed to sync expired cooldowns', error);
+          setDbStatus('error');
+          setSyncError(error instanceof Error ? error.message : 'Database sync failed');
+        })
+        .finally(() => {
+          syncExpiredInFlightRef.current = false;
+        });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [mounted, triggerNotification]);
+  }, [mounted, refreshFromServer, triggerNotification]);
 
   // ── Helper ────────────────────────────────────────────────────────────────
   const getServiceCooldownMinutes = (serviceId: string): number => {
@@ -236,7 +289,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (newRelations.length > 0) await api.saveEmailServices(newRelations);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to add email', error);
+      reportSyncFailure('Failed to add email', error);
       await refreshFromServer();
     }
   };
@@ -248,7 +301,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.deleteEmail(id);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to delete email', error);
+      reportSyncFailure('Failed to delete email', error);
       await refreshFromServer();
     }
   };
@@ -273,7 +326,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await api.saveEmailServices(desired);
         await refreshFromServer();
       } catch (error) {
-        console.error('Failed to update email', error);
+        reportSyncFailure('Failed to update email', error);
         await refreshFromServer();
       }
       return;
@@ -283,7 +336,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.updateEmail(id, { email, nickname, provider, updatedAt: now });
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to update email', error);
+      reportSyncFailure('Failed to update email', error);
       await refreshFromServer();
     }
   };
@@ -317,7 +370,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (newRelations.length > 0) await api.saveEmailServices(newRelations);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to add service', error);
+      reportSyncFailure('Failed to add service', error);
       await refreshFromServer();
     }
   };
@@ -329,7 +382,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.deleteService(id);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to delete service', error);
+      reportSyncFailure('Failed to delete service', error);
       await refreshFromServer();
     }
   };
@@ -343,7 +396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await api.updateService(id, { name, icon, color, ...cooldownPolicy });
     } catch (error) {
-      console.error('Failed to update service', error);
+      reportSyncFailure('Failed to update service', error);
       await refreshFromServer();
       return;
     }
@@ -384,7 +437,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await Promise.all(updatedRelations.filter((es) => es.serviceId === id && (es.status === 'Available' || es.status === 'Cooling Down' || es.status === 'Limit Reached')).map((es) => api.updateEmailService(es)));
         await refreshFromServer();
       } catch (error) {
-        console.error('Failed to propagate service cooldown changes', error);
+        reportSyncFailure('Failed to propagate service cooldown changes', error);
         await refreshFromServer();
       }
     }
@@ -450,7 +503,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.updateEmailService(updated);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to update status', error);
+      reportSyncFailure('Failed to update status', error);
       await refreshFromServer();
     }
   };
@@ -488,7 +541,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.updateEmailService(updated);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to start session', error);
+      reportSyncFailure('Failed to start session', error);
       await refreshFromServer();
     }
   };
@@ -512,7 +565,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.createHistory(historyRecord);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to end session', error);
+      reportSyncFailure('Failed to end session', error);
       await refreshFromServer();
     }
   };
@@ -557,7 +610,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.updateEmailService(updated);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to reset timer', error);
+      reportSyncFailure('Failed to reset timer', error);
       await refreshFromServer();
     }
   };
@@ -573,7 +626,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to load mock data', error);
+      reportSyncFailure('Failed to load mock data', error);
       throw error;
     }
   };
@@ -583,7 +636,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.clearDatabase();
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to clear database', error);
+      reportSyncFailure('Failed to clear database', error);
       throw error;
     }
   };
@@ -593,7 +646,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await api.clearHistory();
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to clear history', error);
+      reportSyncFailure('Failed to clear history', error);
       throw error;
     }
   };
@@ -605,11 +658,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notifications: { ...settings.notifications, ...(newSettings.notifications || {}) },
     };
     setSettings(merged);
+    setTheme(merged.theme);
     try {
       await api.saveSettings(merged);
       await refreshFromServer();
     } catch (error) {
-      console.error('Failed to save settings', error);
+      reportSyncFailure('Failed to save settings', error);
       await refreshFromServer();
     }
   };
@@ -631,14 +685,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await refreshFromServer();
       return true;
     } catch (e) {
-      console.error('Error importing data', e);
+      reportSyncFailure('Error importing data', e);
       return false;
     }
   };
 
   return (
     <AppContext.Provider value={{
-      emails, services, emailServices, history, settings, isLoading, dbStatus,
+      emails, services, emailServices, history, settings, isLoading, dbStatus, syncError,
       addEmail, deleteEmail, updateEmail,
       addService, deleteService, updateService,
       updateStatus, startSession, endSession, reachLimit, resetTimer,

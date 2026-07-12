@@ -6,7 +6,6 @@ interface ThemeContextType {
   theme: Theme;
   resolvedTheme: 'light' | 'dark';
   setTheme: (theme: Theme) => void;
-  toggleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -17,23 +16,11 @@ function getSystemTheme(): 'light' | 'dark' {
 }
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<Theme>('light');
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
-  const [mounted, setMounted] = useState(false);
-
-  // Load theme from localStorage on mount
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('mailstracker-theme') as Theme | null;
-    if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
-      setThemeState(savedTheme);
-    }
-    setMounted(true);
-  }, []);
+  const [theme, setThemeState] = useState<Theme>('dark');
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
 
   // Resolve the actual theme and apply to DOM
   useEffect(() => {
-    if (!mounted) return;
-
     const resolved = theme === 'system' ? getSystemTheme() : theme;
     setResolvedTheme(resolved);
 
@@ -41,11 +28,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     root.setAttribute('data-theme', resolved);
     root.classList.remove('light', 'dark');
     root.classList.add(resolved);
-  }, [theme, mounted]);
+  }, [theme]);
 
   // Listen for system theme changes when theme is 'system'
   useEffect(() => {
-    if (theme !== 'system') return;
+    if (typeof window === 'undefined' || theme !== 'system') return;
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
     const handler = (e: MediaQueryListEvent) => {
       const resolved = e.matches ? 'dark' : 'light';
@@ -59,16 +46,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [theme]);
 
   const setTheme = useCallback((newTheme: Theme) => {
+    // Persistence belongs to D1 settings. This context only renders the
+    // currently loaded database preference and never writes browser storage.
     setThemeState(newTheme);
-    localStorage.setItem('mailstracker-theme', newTheme);
   }, []);
 
-  const toggleTheme = useCallback(() => {
-    setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
-  }, [resolvedTheme, setTheme]);
-
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme }}>
       {children}
     </ThemeContext.Provider>
   );

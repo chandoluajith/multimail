@@ -41,6 +41,9 @@ interface ValidationResult {
  */
 function validateSecrets(env: Env): ValidationResult {
   const errors: string[] = [];
+  const isLocalAppUrl =
+    env.APP_URL?.startsWith('http://localhost:') ||
+    env.APP_URL?.startsWith('http://127.0.0.1:');
 
   // JWT_SECRET — signs all session tokens (always required)
   if (!env.JWT_SECRET || env.JWT_SECRET.length < 32) {
@@ -48,8 +51,8 @@ function validateSecrets(env: Env): ValidationResult {
   }
 
   // APP_URL — used for CSRF origin checks and OAuth redirect URIs
-  if (!env.APP_URL || !env.APP_URL.startsWith('https://')) {
-    errors.push('APP_URL must be a valid HTTPS URL (starts with https://)');
+  if (!env.APP_URL || (!env.APP_URL.startsWith('https://') && !isLocalAppUrl)) {
+    errors.push('APP_URL must be HTTPS in production, or http://localhost for local development');
   }
 
   // GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — OAuth 2.0

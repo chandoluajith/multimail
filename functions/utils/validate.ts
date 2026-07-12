@@ -66,7 +66,7 @@ export const STATUS_VALUES    = [
   'Limited',
   'Cooldown',
 ] as const;
-export const COOLDOWN_UNITS   = ['hours', 'days', 'minutes'] as const;
+export const COOLDOWN_UNITS   = ['minutes', 'hours', 'days', 'weeks'] as const;
 export const THEME_VALUES     = ['dark', 'light', 'system'] as const;
 export const TIMEFORMAT_VALUES = ['12h', '24h'] as const;
 

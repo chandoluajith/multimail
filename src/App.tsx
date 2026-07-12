@@ -14,7 +14,7 @@ import { LoginPage } from './components/LoginPage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { isLoading } = useApp();
+  const { isLoading, syncError } = useApp();
   const { user, isAuthLoading } = useAuth();
 
   const renderActiveView = () => {
@@ -57,6 +57,11 @@ export default function App() {
     <div className="flex h-screen w-full overflow-hidden" style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+        {syncError && (
+          <div className="absolute top-3 left-1/2 z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs font-semibold text-rose-300 shadow-lg backdrop-blur">
+            Database sync failed: {syncError}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto pt-14 md:pt-0 pb-24 md:pb-6">
           {renderActiveView()}
         </div>

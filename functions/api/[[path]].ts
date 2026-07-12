@@ -95,6 +95,74 @@ const DEFAULT_SETTINGS: AppSettings = {
   timeFormat: '12h', defaultCooldownDuration: 3, defaultStatus: 'Unknown',
 };
 
+function resetHistoryId(emailServiceId: string, resetTime: string): string {
+  const resetMs = Date.parse(resetTime);
+  const suffix = Number.isFinite(resetMs) ? resetMs.toString(36) : 'unknown';
+  const safeId = emailServiceId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+  return `hist_auto_${safeId}_${suffix}`.slice(0, 128);
+}
+
+async function syncExpiredCooldowns(db: D1Database, userId: string, encKey: string): Promise<number> {
+  const now = new Date().toISOString();
+  const expired = await db.prepare(`
+    SELECT
+      es.id,
+      es.estimatedResetTime,
+      e.nickname AS emailNickname,
+      e.email AS emailAddress,
+      s.name AS serviceName
+    FROM email_services es
+    JOIN emails e ON e.id = es.emailId AND e.userId = ?
+    JOIN services s ON s.id = es.serviceId AND (s.userId IS NULL OR s.userId = ?)
+    WHERE es.userId = ?
+      AND es.estimatedResetTime IS NOT NULL
+      AND es.status IN ('Cooling Down', 'Limit Reached')
+      AND es.estimatedResetTime <= ?
+    LIMIT 100
+  `).bind(userId, userId, userId, now).all<{
+    id: string;
+    estimatedResetTime: string;
+    emailNickname: string;
+    emailAddress: string;
+    serviceName: string;
+  }>();
+
+  const rows = expired.results || [];
+  if (rows.length === 0) return 0;
+
+  const stmts = [];
+  for (const row of rows) {
+    const plainEmail = await safeDecryptEmail(row.emailAddress, encKey);
+    const encryptedHistoryEmail = await encryptEmail(plainEmail, encKey);
+
+    stmts.push(
+      db.prepare('INSERT OR IGNORE INTO usage_history (id,userId,emailServiceId,emailNickname,emailAddress,serviceName,event,timestamp,notes) VALUES (?,?,?,?,?,?,?,?,?)')
+        .bind(
+          resetHistoryId(row.id, row.estimatedResetTime),
+          userId,
+          row.id,
+          row.emailNickname,
+          encryptedHistoryEmail,
+          row.serviceName,
+          'Reset Completed',
+          now,
+          'Cooldown period expired. Automatically reset.',
+        ),
+      db.prepare(`UPDATE email_services
+        SET status='Available',
+            remainingRequests=maximumRequests,
+            estimatedResetTime=NULL,
+            estimatedResetDuration=NULL,
+            updatedAt=?
+        WHERE id=? AND userId=? AND estimatedResetTime=? AND status IN ('Cooling Down', 'Limit Reached')`)
+        .bind(now, row.id, userId, row.estimatedResetTime),
+    );
+  }
+
+  await db.batch(stmts);
+  return rows.length;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const onRequestOptions: PagesFunction<Env> = (ctx) =>
@@ -220,6 +288,8 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
     // ── GET /api/data ────────────────────────────────────────────────────
     if (method === 'GET' && segments[0] === 'data') {
       const encKey = env.ENCRYPT_SECRET || env.JWT_SECRET;
+      await syncExpiredCooldowns(db, userId, encKey);
+
       const [eRes, sRes, esRes, hRes, stRes] = await Promise.all([
         db.prepare('SELECT * FROM emails WHERE userId=?').bind(userId).all<any>(),
         db.prepare('SELECT * FROM services WHERE userId IS NULL OR userId=?').bind(userId).all<any>(),
@@ -273,8 +343,18 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         validateEmailUpdate(b);                           // ← server validation
         const eb = b as Partial<Email>;
         const encEmail = eb.email ? await encryptEmail(eb.email, encKey) : eb.email;
-        await db.prepare('UPDATE emails SET email=?,nickname=?,provider=?,updatedAt=? WHERE id=? AND userId=?')
+        const res = await db.prepare('UPDATE emails SET email=?,nickname=?,provider=?,updatedAt=? WHERE id=? AND userId=?')
           .bind(encEmail, eb.nickname!.trim(), eb.provider!.trim(), eb.updatedAt, segments[1], userId).run();
+        if ((res.meta?.changes ?? 0) === 0) {
+          ctx.waitUntil(logRequest(db, request, 'idor_attempt', clientIp, {
+            severity: 'critical', userId,
+            details:  { resource: 'emails', action: 'PUT', emailId: segments[1] },
+          }));
+          return new Response(
+            JSON.stringify({ error: 'Forbidden: email not owned by user' }),
+            { status: 403, headers: h },
+          );
+        }
         return new Response(JSON.stringify({ success: true }), { headers: h });
       }
       if (method === 'DELETE' && segments[1]) {
@@ -311,10 +391,10 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         validateServiceUpdate(b);                         // ← server validation
         const sb = b as Partial<Service>;
         const res = await db
-          .prepare('UPDATE services SET name=?,icon=?,color=?,defaultCooldownValue=?,defaultCooldownUnit=?,autoStartCooldown=?,autoResetStatus=?,allowOverride=? WHERE id=? AND userId=?')
+          .prepare('UPDATE services SET name=?,icon=?,color=?,defaultCooldownValue=?,defaultCooldownUnit=?,autoStartCooldown=?,autoResetStatus=?,allowOverride=? WHERE id=? AND (userId=? OR userId IS NULL)')
           .bind(sb.name!.trim(), sb.icon!.trim(), sb.color!.trim(), sb.defaultCooldownValue??null, sb.defaultCooldownUnit??null, fromBool(sb.autoStartCooldown), fromBool(sb.autoResetStatus), fromBool(sb.allowOverride), segments[1], userId)
           .run();
-        // 0 rows affected means either (a) wrong owner (IDOR) or (b) global service — both are forbidden
+        // 0 rows affected means either a missing service or another user's custom service.
         if ((res.meta?.changes ?? 0) === 0) {
           ctx.waitUntil(logRequest(db, request, 'idor_attempt', clientIp, {
             severity: 'critical', userId,
@@ -408,8 +488,18 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         const esRaw = await request.json();
         validateEmailServiceUpdate(esRaw);                // ← server validation
         const es = esRaw as EmailService;
-        await db.prepare('UPDATE email_services SET status=?,remainingRequests=?,maximumRequests=?,lastUsed=?,lastLimitReached=?,estimatedResetTime=?,estimatedResetDuration=?,notes=?,updatedAt=? WHERE id=? AND userId=?')
+        const res = await db.prepare('UPDATE email_services SET status=?,remainingRequests=?,maximumRequests=?,lastUsed=?,lastLimitReached=?,estimatedResetTime=?,estimatedResetDuration=?,notes=?,updatedAt=? WHERE id=? AND userId=?')
           .bind(es.status, es.remainingRequests??null, es.maximumRequests??null, es.lastUsed??null, es.lastLimitReached??null, es.estimatedResetTime??null, es.estimatedResetDuration??null, es.notes??null, es.updatedAt, es.id, userId).run();
+        if ((res.meta?.changes ?? 0) === 0) {
+          ctx.waitUntil(logRequest(db, request, 'idor_attempt', clientIp, {
+            severity: 'critical', userId,
+            details:  { resource: 'email_services', action: 'PUT', emailServiceId: es.id },
+          }));
+          return new Response(
+            JSON.stringify({ error: 'Forbidden: email service not owned by user' }),
+            { status: 403, headers: h },
+          );
+        }
         return new Response(JSON.stringify({ success: true }), { headers: h });
       }
       if (method === 'DELETE') {
@@ -477,6 +567,13 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         timeFormat=excluded.timeFormat, defaultCooldownDuration=excluded.defaultCooldownDuration, defaultStatus=excluded.defaultStatus`)
         .bind(userId, s.theme, fromBool(s.notifications.resetCompleted), fromBool(s.notifications.resetTenMinutes), fromBool(s.notifications.cooldownFinished), s.timeFormat, s.defaultCooldownDuration, s.defaultStatus).run();
       return new Response(JSON.stringify({ success: true }), { headers: h });
+    }
+
+    // ── /api/actions/sync-expired ─────────────────────────────────────────
+    if (segments[0] === 'actions' && segments[1] === 'sync-expired' && method === 'POST') {
+      const encKey = env.ENCRYPT_SECRET || env.JWT_SECRET;
+      const synced = await syncExpiredCooldowns(db, userId, encKey);
+      return new Response(JSON.stringify({ success: true, synced }), { headers: h });
     }
 
     // ── /api/actions/load-mock ─────────────────────────────────────────────

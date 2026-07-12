@@ -34,9 +34,11 @@ export const DashboardView: React.FC = () => {
  reachLimit, 
  resetTimer, 
  updateStatus,
- dbStatus
+ dbStatus,
+ settings,
+ updateSettings
  } = useApp();
- const { resolvedTheme, toggleTheme } = useTheme();
+ const { resolvedTheme } = useTheme();
 
  const [searchQuery, setSearchQuery] = useState('');
  const [selectedProvider, setSelectedProvider] = useState<ProviderType | 'All'>('All');
@@ -323,7 +325,7 @@ export const DashboardView: React.FC = () => {
 
  {/* Theme toggle */}
  <button
- onClick={toggleTheme}
+ onClick={() => updateSettings({ theme: resolvedTheme === 'dark' ? 'light' : 'dark' })}
  title={resolvedTheme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
  style={{
@@ -337,7 +339,7 @@ export const DashboardView: React.FC = () => {
  ? <Sun size={14} className="text-amber-400" />
  : <Moon size={14} className="text-indigo-500" />
  }
- <span className="hidden sm:inline">{resolvedTheme === 'dark' ? 'Light' : 'Dark'}</span>
+ <span className="hidden sm:inline">{settings.theme === 'system' ? 'System' : resolvedTheme === 'dark' ? 'Light' : 'Dark'}</span>
  </button>
  </div>
  </div>

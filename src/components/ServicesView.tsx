@@ -231,6 +231,7 @@ export const ServicesView: React.FC = () => {
  >
  <Edit2 size={13} />
  </button>
+ {service.isCustom && (
  <button
  onClick={() => setDeleteConfirmId(service.id)}
  className="p-1.5 rounded-lg theme-text-secondary hover:text-rose-450 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/10 transition cursor-pointer"
@@ -238,6 +239,7 @@ export const ServicesView: React.FC = () => {
  >
  <Trash2 size={13} />
  </button>
+ )}
  </div>
  </div>
 
