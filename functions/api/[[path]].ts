@@ -95,6 +95,29 @@ const DEFAULT_SETTINGS: AppSettings = {
   timeFormat: '12h', defaultCooldownDuration: 3, defaultStatus: 'Unknown',
 };
 
+function normalizeEmailAddress(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+async function findDuplicateEmailId(
+  db: D1Database,
+  userId: string,
+  email: string,
+  encKey: string,
+  excludeId?: string,
+): Promise<string | null> {
+  const target = normalizeEmailAddress(email);
+  const rows = await db.prepare('SELECT id,email FROM emails WHERE userId=?').bind(userId).all<{ id: string; email: string }>();
+
+  for (const row of rows.results || []) {
+    if (excludeId && row.id === excludeId) continue;
+    const savedEmail = await safeDecryptEmail(row.email, encKey);
+    if (normalizeEmailAddress(savedEmail) === target) return row.id;
+  }
+
+  return null;
+}
+
 function resetHistoryId(emailServiceId: string, resetTime: string): string {
   const resetMs = Date.parse(resetTime);
   const suffix = Number.isFinite(resetMs) ? resetMs.toString(36) : 'unknown';
@@ -333,6 +356,13 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         const b = await request.json();
         validateEmailCreate(b);                           // ← server validation
         const eb = b as Email;
+        const duplicateId = await findDuplicateEmailId(db, userId, eb.email, encKey);
+        if (duplicateId) {
+          return new Response(
+            JSON.stringify({ error: 'This email already exists.' }),
+            { status: 409, headers: h },
+          );
+        }
         const encEmail = await encryptEmail(eb.email, encKey);
         await db.prepare('INSERT INTO emails (id,userId,email,nickname,provider,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)')
           .bind(eb.id, userId, encEmail, eb.nickname.trim(), eb.provider.trim(), eb.createdAt, eb.updatedAt).run();
@@ -342,6 +372,13 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         const b = await request.json();
         validateEmailUpdate(b);                           // ← server validation
         const eb = b as Partial<Email>;
+        const duplicateId = await findDuplicateEmailId(db, userId, eb.email!, encKey, segments[1]);
+        if (duplicateId) {
+          return new Response(
+            JSON.stringify({ error: 'This email already exists.' }),
+            { status: 409, headers: h },
+          );
+        }
         const encEmail = eb.email ? await encryptEmail(eb.email, encKey) : eb.email;
         const res = await db.prepare('UPDATE emails SET email=?,nickname=?,provider=?,updatedAt=? WHERE id=? AND userId=?')
           .bind(encEmail, eb.nickname!.trim(), eb.provider!.trim(), eb.updatedAt, segments[1], userId).run();

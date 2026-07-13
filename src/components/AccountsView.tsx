@@ -29,6 +29,7 @@ export const AccountsView: React.FC = () => {
   const [nickname, setNickname] = useState('');
   const [provider, setProvider] = useState<ProviderType>('Gmail');
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export const AccountsView: React.FC = () => {
     setEmailAddress('');
     setNickname('');
     setProvider('Gmail');
+    setFormError(null);
     // Default: nothing selected
     setSelectedServiceIds([]);
     setIsOpen(true);
@@ -47,6 +49,7 @@ export const AccountsView: React.FC = () => {
     setEmailAddress(email.email);
     setNickname(email.nickname);
     setProvider(email.provider);
+    setFormError(null);
     // Pre-select services this account already uses
     const currentIds = emailServices
       .filter((es) => es.emailId === email.id)
@@ -69,16 +72,32 @@ export const AccountsView: React.FC = () => {
     setSelectedServiceIds([]);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!emailAddress || !nickname) return;
 
-    if (editingEmail) {
-      updateEmail(editingEmail.id, emailAddress, nickname, provider, selectedServiceIds);
-    } else {
-      addEmail(emailAddress, nickname, provider, selectedServiceIds);
+    const normalizedEmail = emailAddress.trim().toLowerCase();
+    const duplicate = emails.find((email) =>
+      email.id !== editingEmail?.id &&
+      email.email.trim().toLowerCase() === normalizedEmail
+    );
+
+    if (duplicate) {
+      setFormError('This email already exists.');
+      return;
     }
-    setIsOpen(false);
+
+    try {
+      if (editingEmail) {
+        await updateEmail(editingEmail.id, emailAddress, nickname, provider, selectedServiceIds);
+      } else {
+        await addEmail(emailAddress, nickname, provider, selectedServiceIds);
+      }
+      setIsOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Failed to save email account.');
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -337,10 +356,23 @@ export const AccountsView: React.FC = () => {
                       type="email"
                       required
                       value={emailAddress}
-                      onChange={(e) => setEmailAddress(e.target.value)}
+                      onChange={(e) => {
+                        setEmailAddress(e.target.value);
+                        if (formError) setFormError(null);
+                      }}
                       placeholder="username@domain.com"
-                      className="w-full theme-bg-primary border theme-border rounded-xl px-4 py-2.5 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition"
+                      className={`w-full theme-bg-primary border rounded-xl px-4 py-2.5 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:ring-1 transition ${
+                        formError
+                          ? 'border-rose-500/60 focus:border-rose-500 focus:ring-rose-500/20'
+                          : 'theme-border focus:border-blue-500 focus:ring-blue-500/20'
+                      }`}
                     />
+                    {formError && (
+                      <p className="flex items-center gap-1.5 text-xs font-semibold text-rose-400">
+                        <AlertCircle size={13} />
+                        {formError}
+                      </p>
+                    )}
                   </div>
 
                   {/* Provider */}

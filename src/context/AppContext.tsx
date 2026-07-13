@@ -291,6 +291,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (error) {
       reportSyncFailure('Failed to add email', error);
       await refreshFromServer();
+      throw error;
     }
   };
 
@@ -328,6 +329,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (error) {
         reportSyncFailure('Failed to update email', error);
         await refreshFromServer();
+        throw error;
       }
       return;
     }
@@ -338,6 +340,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (error) {
       reportSyncFailure('Failed to update email', error);
       await refreshFromServer();
+      throw error;
     }
   };
 
