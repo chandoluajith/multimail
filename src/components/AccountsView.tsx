@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -12,15 +12,19 @@ import {
   AlertCircle,
   Check,
   Zap,
+  ArrowUpDown,
 } from 'lucide-react';
 import { ProviderType, Email } from '../types';
 import { ServiceIcon } from './ServiceIcon';
 
+type AccountSort = 'alphabetical' | 'most-used' | 'least-used' | 'recently-used' | 'recently-added';
+
 export const AccountsView: React.FC = () => {
-  const { emails, emailServices, services, addEmail, updateEmail, deleteEmail } = useApp();
+  const { emails, emailServices, services, history, addEmail, updateEmail, deleteEmail } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<ProviderType | 'All'>('All');
+  const [sortBy, setSortBy] = useState<AccountSort>('alphabetical');
 
   // Modal states
   const [isOpen, setIsOpen] = useState(false);
@@ -110,14 +114,63 @@ export const AccountsView: React.FC = () => {
     setDeleteConfirmId(null);
   };
 
-  // Filter accounts
-  const filteredEmails = emails.filter((email) => {
-    const matchesSearch =
-      email.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      email.nickname.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesProvider = selectedProvider === 'All' || email.provider === selectedProvider;
-    return matchesSearch && matchesProvider;
-  });
+  const sortedEmails = useMemo(() => {
+    const relationEmailById = new Map(emailServices.map((es) => [es.id, es.emailId]));
+    const usageCountByEmail = new Map<string, number>();
+    const lastUsedByEmail = new Map<string, number>();
+
+    history.forEach((item) => {
+      const emailId = relationEmailById.get(item.emailServiceId);
+      if (!emailId) return;
+      usageCountByEmail.set(emailId, (usageCountByEmail.get(emailId) ?? 0) + 1);
+      const timestamp = new Date(item.timestamp).getTime();
+      if (!Number.isNaN(timestamp)) {
+        lastUsedByEmail.set(emailId, Math.max(lastUsedByEmail.get(emailId) ?? 0, timestamp));
+      }
+    });
+
+    emailServices.forEach((relation) => {
+      if (!relation.lastUsed) return;
+      const timestamp = new Date(relation.lastUsed).getTime();
+      if (!Number.isNaN(timestamp)) {
+        lastUsedByEmail.set(relation.emailId, Math.max(lastUsedByEmail.get(relation.emailId) ?? 0, timestamp));
+      }
+    });
+
+    const toTime = (value?: string) => {
+      if (!value) return 0;
+      const timestamp = new Date(value).getTime();
+      return Number.isNaN(timestamp) ? 0 : timestamp;
+    };
+
+    const alphabetical = (a: Email, b: Email) =>
+      (a.nickname || a.email).localeCompare(b.nickname || b.email, undefined, { sensitivity: 'base' }) ||
+      a.email.localeCompare(b.email, undefined, { sensitivity: 'base' });
+
+    return emails
+      .filter((email) => {
+        const matchesSearch =
+          email.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          email.nickname.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesProvider = selectedProvider === 'All' || email.provider === selectedProvider;
+        return matchesSearch && matchesProvider;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'most-used') {
+          return (usageCountByEmail.get(b.id) ?? 0) - (usageCountByEmail.get(a.id) ?? 0) || alphabetical(a, b);
+        }
+        if (sortBy === 'least-used') {
+          return (usageCountByEmail.get(a.id) ?? 0) - (usageCountByEmail.get(b.id) ?? 0) || alphabetical(a, b);
+        }
+        if (sortBy === 'recently-used') {
+          return (lastUsedByEmail.get(b.id) ?? 0) - (lastUsedByEmail.get(a.id) ?? 0) || alphabetical(a, b);
+        }
+        if (sortBy === 'recently-added') {
+          return toTime(b.createdAt) - toTime(a.createdAt) || alphabetical(a, b);
+        }
+        return alphabetical(a, b);
+      });
+  }, [emails, emailServices, history, searchQuery, selectedProvider, sortBy]);
 
   const getProviderBg = (prov: ProviderType) => {
     switch (prov) {
@@ -158,25 +211,42 @@ export const AccountsView: React.FC = () => {
             className="w-full theme-bg-surface-alt border theme-border-subtle rounded-xl py-2.5 pl-10 pr-4 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all font-body"
           />
         </div>
-        <div className="flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-1.5 self-start lg:self-auto">
-          <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
-          <select
-            value={selectedProvider}
-            onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
-            className="bg-transparent text-xs theme-text-secondary font-medium focus:outline-none cursor-pointer"
-          >
-            <option value="All"  className="theme-bg-primary theme-text-secondary">All Providers</option>
-            <option value="Gmail"   className="theme-bg-primary theme-text-secondary">Gmail</option>
-            <option value="Outlook" className="theme-bg-primary theme-text-secondary">Outlook</option>
-            <option value="Proton"  className="theme-bg-primary theme-text-secondary">Proton</option>
-            <option value="Yahoo"   className="theme-bg-primary theme-text-secondary">Yahoo</option>
-            <option value="Custom"  className="theme-bg-primary theme-text-secondary">Custom</option>
-          </select>
+        <div className="flex flex-col sm:flex-row gap-2 self-start lg:self-auto">
+          <div className="flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-1.5">
+            <ArrowUpDown size={14} className="theme-text-muted" />
+            <span className="text-xs theme-text-muted font-semibold uppercase">Sort:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as AccountSort)}
+              className="bg-transparent text-xs theme-text-secondary font-medium focus:outline-none cursor-pointer"
+            >
+              <option value="alphabetical" className="theme-bg-primary theme-text-secondary">Alphabetical</option>
+              <option value="most-used" className="theme-bg-primary theme-text-secondary">Most Used</option>
+              <option value="least-used" className="theme-bg-primary theme-text-secondary">Least Used</option>
+              <option value="recently-used" className="theme-bg-primary theme-text-secondary">Recently Used</option>
+              <option value="recently-added" className="theme-bg-primary theme-text-secondary">Recently Added</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-1.5">
+            <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
+            <select
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
+              className="bg-transparent text-xs theme-text-secondary font-medium focus:outline-none cursor-pointer"
+            >
+              <option value="All"  className="theme-bg-primary theme-text-secondary">All Providers</option>
+              <option value="Gmail"   className="theme-bg-primary theme-text-secondary">Gmail</option>
+              <option value="Outlook" className="theme-bg-primary theme-text-secondary">Outlook</option>
+              <option value="Proton"  className="theme-bg-primary theme-text-secondary">Proton</option>
+              <option value="Yahoo"   className="theme-bg-primary theme-text-secondary">Yahoo</option>
+              <option value="Custom"  className="theme-bg-primary theme-text-secondary">Custom</option>
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Grid */}
-      {filteredEmails.length === 0 ? (
+      {sortedEmails.length === 0 ? (
         <div className="p-12 text-center rounded-2xl theme-bg-surface-alt border theme-border-subtle flex flex-col items-center justify-center gap-3">
           <Info size={36} className="theme-text-muted" />
           <h4 className="theme-text-secondary font-semibold font-heading">No accounts found</h4>
@@ -184,7 +254,7 @@ export const AccountsView: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredEmails.map((email) => {
+          {sortedEmails.map((email) => {
             const accountRelations = emailServices.filter((es) => es.emailId === email.id);
             const coolingDown = accountRelations.filter((es) => es.status === 'Cooling Down').length;
             const limited    = accountRelations.filter((es) => es.status === 'Limit Reached').length;
