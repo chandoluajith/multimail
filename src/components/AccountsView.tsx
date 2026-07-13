@@ -10,20 +10,57 @@ import {
   Mail,
   Info,
   AlertCircle,
+  BarChart3,
   Check,
   Zap,
   ArrowUpDown,
+  ChevronDown,
 } from 'lucide-react';
-import { ProviderType, Email } from '../types';
+import { ProviderType, Email, StatusType } from '../types';
 import { ServiceIcon } from './ServiceIcon';
 
 type AccountSort = 'alphabetical' | 'most-used' | 'least-used' | 'recently-used' | 'recently-added';
+type AccountStatusFilter = StatusType | 'All';
+
+const providerList: ProviderType[] = ['Gmail', 'Outlook', 'Proton', 'Yahoo', 'Custom'];
+const statusList: StatusType[] = ['Available', 'Cooling Down', 'Limit Reached', 'Resetting Soon', 'Unknown'];
+
+const chipBase = 'flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-xs font-semibold cursor-pointer select-none whitespace-nowrap transition-all duration-200';
+
+const chipSelectedStyle: Record<string, string> = {
+  blue: 'bg-blue-500/15 border-blue-400/40 text-blue-300 chip-glow-blue',
+  emerald: 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 chip-glow-emerald',
+  amber: 'bg-amber-500/15 border-amber-400/40 text-amber-300 chip-glow-amber',
+  rose: 'bg-rose-500/15 border-rose-400/40 text-rose-300 chip-glow-rose',
+  sky: 'bg-sky-500/15 border-sky-400/40 text-sky-300 chip-glow-sky',
+  violet: 'bg-violet-500/15 border-violet-400/40 text-violet-300 chip-glow-violet',
+  slate: 'theme-bg-surface-alt theme-border-subtle theme-text-secondary chip-glow-blue',
+};
+
+const chipUnselected = 'theme-bg-surface-alt theme-border-subtle theme-text-secondary hover:theme-border-subtle';
+
+const statusDotColor: Record<StatusType, string> = {
+  'Available': 'bg-emerald-400',
+  'Cooling Down': 'bg-amber-400',
+  'Limit Reached': 'bg-rose-400',
+  'Resetting Soon': 'bg-sky-400',
+  'Unknown': 'theme-bg-tertiary',
+};
+
+const statusAccent: Record<StatusType, string> = {
+  'Available': 'emerald',
+  'Cooling Down': 'amber',
+  'Limit Reached': 'rose',
+  'Resetting Soon': 'sky',
+  'Unknown': 'slate',
+};
 
 export const AccountsView: React.FC = () => {
   const { emails, emailServices, services, history, addEmail, updateEmail, deleteEmail } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<ProviderType | 'All'>('All');
+  const [selectedStatus, setSelectedStatus] = useState<AccountStatusFilter>('All');
   const [sortBy, setSortBy] = useState<AccountSort>('alphabetical');
 
   // Modal states
@@ -153,7 +190,10 @@ export const AccountsView: React.FC = () => {
           email.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
           email.nickname.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesProvider = selectedProvider === 'All' || email.provider === selectedProvider;
-        return matchesSearch && matchesProvider;
+        const matchesStatus =
+          selectedStatus === 'All' ||
+          emailServices.some((relation) => relation.emailId === email.id && relation.status === selectedStatus);
+        return matchesSearch && matchesProvider && matchesStatus;
       })
       .sort((a, b) => {
         if (sortBy === 'most-used') {
@@ -170,7 +210,7 @@ export const AccountsView: React.FC = () => {
         }
         return alphabetical(a, b);
       });
-  }, [emails, emailServices, history, searchQuery, selectedProvider, sortBy]);
+  }, [emails, emailServices, history, searchQuery, selectedProvider, selectedStatus, sortBy]);
 
   const getProviderBg = (prov: ProviderType) => {
     switch (prov) {
@@ -200,25 +240,25 @@ export const AccountsView: React.FC = () => {
       </div>
 
       {/* Filters & Search */}
-      <div className="p-4 rounded-2xl theme-bg-surface-alt border theme-border-subtle flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
-        <div className="relative flex-1">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 theme-text-muted" size={18} />
-          <input
-            type="text"
-            placeholder="Search accounts..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full theme-bg-surface-alt border theme-border-subtle rounded-xl py-2.5 pl-10 pr-4 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all font-body"
-          />
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 self-start lg:self-auto">
-          <div className="flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-1.5">
+      <div className="space-y-3 p-4 rounded-2xl theme-bg-surface-alt border theme-border-subtle">
+        <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 theme-text-muted" size={18} />
+            <input
+              type="text"
+              placeholder="Search accounts..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full theme-bg-surface-alt border theme-border-subtle rounded-xl py-2.5 pl-10 pr-4 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all font-body"
+            />
+          </div>
+          <label className="relative flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-2 self-start lg:self-auto min-w-[220px]">
             <ArrowUpDown size={14} className="theme-text-muted" />
             <span className="text-xs theme-text-muted font-semibold uppercase">Sort:</span>
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as AccountSort)}
-              className="bg-transparent text-xs theme-text-secondary font-medium focus:outline-none cursor-pointer"
+              className="flex-1 appearance-none bg-transparent pr-6 text-sm theme-text-secondary font-semibold focus:outline-none cursor-pointer"
             >
               <option value="alphabetical" className="theme-bg-primary theme-text-secondary">Alphabetical</option>
               <option value="most-used" className="theme-bg-primary theme-text-secondary">Most Used</option>
@@ -226,22 +266,59 @@ export const AccountsView: React.FC = () => {
               <option value="recently-used" className="theme-bg-primary theme-text-secondary">Recently Used</option>
               <option value="recently-added" className="theme-bg-primary theme-text-secondary">Recently Added</option>
             </select>
-          </div>
-          <div className="flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-1.5">
-            <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
-            <select
-              value={selectedProvider}
-              onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
-              className="bg-transparent text-xs theme-text-secondary font-medium focus:outline-none cursor-pointer"
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 theme-text-secondary pointer-events-none" />
+          </label>
+        </div>
+
+        <div className="border-t theme-border-subtle" />
+
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.93 }}
+            onClick={() => setSelectedStatus('All')}
+            className={`${chipBase} ${selectedStatus === 'All' ? chipSelectedStyle.blue : chipUnselected}`}
+          >
+            <BarChart3 size={13} />
+            <span>All Status</span>
+          </motion.button>
+          {statusList.map((status) => (
+            <motion.button
+              key={status}
+              type="button"
+              whileTap={{ scale: 0.93 }}
+              onClick={() => setSelectedStatus(status)}
+              className={`${chipBase} ${selectedStatus === status ? chipSelectedStyle[statusAccent[status]] : chipUnselected}`}
             >
-              <option value="All"  className="theme-bg-primary theme-text-secondary">All Providers</option>
-              <option value="Gmail"   className="theme-bg-primary theme-text-secondary">Gmail</option>
-              <option value="Outlook" className="theme-bg-primary theme-text-secondary">Outlook</option>
-              <option value="Proton"  className="theme-bg-primary theme-text-secondary">Proton</option>
-              <option value="Yahoo"   className="theme-bg-primary theme-text-secondary">Yahoo</option>
-              <option value="Custom"  className="theme-bg-primary theme-text-secondary">Custom</option>
-            </select>
-          </div>
+              <span className={`w-2 h-2 rounded-full ${statusDotColor[status]}`} />
+              <span>{status}</span>
+            </motion.button>
+          ))}
+        </div>
+
+        <div className="border-t theme-border-subtle" />
+
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.93 }}
+            onClick={() => setSelectedProvider('All')}
+            className={`${chipBase} ${selectedProvider === 'All' ? chipSelectedStyle.violet : chipUnselected}`}
+          >
+            <Mail size={13} />
+            <span>All Providers</span>
+          </motion.button>
+          {providerList.map((providerName) => (
+            <motion.button
+              key={providerName}
+              type="button"
+              whileTap={{ scale: 0.93 }}
+              onClick={() => setSelectedProvider(providerName)}
+              className={`${chipBase} ${selectedProvider === providerName ? chipSelectedStyle.violet : chipUnselected}`}
+            >
+              <span>{providerName}</span>
+            </motion.button>
+          ))}
         </div>
       </div>
 
