@@ -72,19 +72,24 @@ export const AccountsView: React.FC = () => {
     setSelectedServiceIds([]);
   };
 
+  const getDuplicateEmailError = (value: string): string | null => {
+    if (!value.includes('@')) return null;
+    const normalizedEmail = value.trim().toLowerCase();
+    const duplicate = emails.find((email) =>
+      email.id !== editingEmail?.id &&
+      email.email.trim().toLowerCase() === normalizedEmail
+    );
+    return duplicate ? 'This email already exists.' : null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     if (!emailAddress || !nickname) return;
 
-    const normalizedEmail = emailAddress.trim().toLowerCase();
-    const duplicate = emails.find((email) =>
-      email.id !== editingEmail?.id &&
-      email.email.trim().toLowerCase() === normalizedEmail
-    );
-
-    if (duplicate) {
-      setFormError('This email already exists.');
+    const duplicateError = getDuplicateEmailError(emailAddress);
+    if (duplicateError) {
+      setFormError(duplicateError);
       return;
     }
 
@@ -357,8 +362,9 @@ export const AccountsView: React.FC = () => {
                       required
                       value={emailAddress}
                       onChange={(e) => {
-                        setEmailAddress(e.target.value);
-                        if (formError) setFormError(null);
+                        const nextEmail = e.target.value;
+                        setEmailAddress(nextEmail);
+                        setFormError(getDuplicateEmailError(nextEmail));
                       }}
                       placeholder="username@domain.com"
                       className={`w-full theme-bg-primary border rounded-xl px-4 py-2.5 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:ring-1 transition ${
