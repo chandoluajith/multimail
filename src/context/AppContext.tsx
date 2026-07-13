@@ -462,7 +462,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if ((status === 'Cooling Down' || status === 'Limit Reached') && overrideResetTime) {
       estimatedResetTime = overrideResetTime;
-      estimatedResetDuration = new Date(overrideResetTime).getTime() - now.getTime();
+      estimatedResetDuration = Math.max(0, new Date(overrideResetTime).getTime() - now.getTime());
     } else if ((status === 'Cooling Down' || status === 'Limit Reached') && cooldownMinutes && cooldownMinutes > 0) {
       estimatedResetTime = new Date(now.getTime() + cooldownMinutes * 60 * 1000).toISOString();
       estimatedResetDuration = cooldownMinutes * 60 * 1000;

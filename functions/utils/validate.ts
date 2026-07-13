@@ -50,6 +50,12 @@ function isPositiveInt(v: unknown): v is number {
 function isOptPositiveInt(v: unknown): boolean {
   return v === null || v === undefined || isPositiveInt(v);
 }
+function isDurationMs(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 31_536_000_000;
+}
+function isOptDurationMs(v: unknown): boolean {
+  return v === null || v === undefined || isDurationMs(v);
+}
 function isOneOf<T extends string>(v: unknown, options: readonly T[]): v is T {
   return typeof v === 'string' && (options as readonly string[]).includes(v);
 }
@@ -170,8 +176,8 @@ export function validateEmailServiceUpdate(body: unknown): void {
                              e.push({ field: 'lastLimitReached', message: 'Must be a valid ISO timestamp or null' });
   if (!isOptTimestamp(b?.estimatedResetTime))
                              e.push({ field: 'estimatedResetTime', message: 'Must be a valid ISO timestamp or null' });
-  if (!isOptPositiveInt(b?.estimatedResetDuration))
-                             e.push({ field: 'estimatedResetDuration', message: 'Must be a non-negative integer or null' });
+  if (!isOptDurationMs(b?.estimatedResetDuration))
+                             e.push({ field: 'estimatedResetDuration', message: 'Must be a non-negative duration in milliseconds or null' });
   if (!isOptString(b?.notes, 1000))
                              e.push({ field: 'notes', message: 'Must be a string, max 1000 characters' });
   if (!isTimestamp(b?.updatedAt))

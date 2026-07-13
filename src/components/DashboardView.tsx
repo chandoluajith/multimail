@@ -649,6 +649,7 @@ export const DashboardView: React.FC = () => {
  <div className="grid grid-cols-2 gap-3">
  <button
  onClick={() => {
+ const cooldownMinutes = Number(customCooldown);
  if (useOverride && computedOverrideISO) {
  // Use exact date/time override
  updateStatus(
@@ -660,6 +661,16 @@ export const DashboardView: React.FC = () => {
  undefined,
  'Reached quota limit. Manual reset time set.',
  computedOverrideISO
+ );
+ } else if (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0) {
+ updateStatus(
+ activeEmailObj.id,
+ activeServiceObj.id,
+ 'Limit Reached',
+ cooldownMinutes,
+ 0,
+ undefined,
+ customNotes || `Reached quota limit. Cooldown timer set for ${cooldownMinutes} minutes.`
  );
  } else {
  // Use service default policy
