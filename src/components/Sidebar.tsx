@@ -74,11 +74,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
  >
  <Icon size={18} className={isActive ? 'text-blue-500' : ''} style={!isActive ? { color: 'var(--text-tertiary)' } : undefined} />
  <span>{tab.name}</span>
- {tab.id === 'dashboard' && cooldownCount > 0 && (
- <span className="ml-auto flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-500 font-bold">
- {cooldownCount}
- </span>
- )}
  </button>
  );
  })}
