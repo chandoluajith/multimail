@@ -227,6 +227,19 @@ export const DashboardView: React.FC = () => {
  const providerList: ProviderType[] = ['Gmail', 'Outlook', 'Proton', 'Yahoo', 'Custom'];
  const statusList: StatusType[] = ['Available', 'Cooling Down', 'Limit Reached', 'Resetting Soon', 'Unknown'];
 
+ const formatResetDate = (value: string) => {
+ const date = new Date(value);
+ if (Number.isNaN(date.getTime())) return null;
+ return new Intl.DateTimeFormat('en-US', {
+ month: 'short',
+ day: '2-digit',
+ year: 'numeric',
+ hour: 'numeric',
+ minute: '2-digit',
+ hour12: true,
+ }).format(date);
+ };
+
  const handleOpenControl = (emailId: string, serviceId: string) => {
  const relation = emailServices.find(es => es.emailId === emailId && es.serviceId === serviceId);
  if (relation) {
@@ -603,6 +616,8 @@ export const DashboardView: React.FC = () => {
  {activeRelations.map((es) => {
  const service = services.find(s => s.id === es.serviceId);
  if (!service) return null;
+ const resetDateText = es.estimatedResetTime ? formatResetDate(es.estimatedResetTime) : null;
+ const showResetDate = resetDateText && (es.status === 'Cooling Down' || es.status === 'Limit Reached');
 
  return (
  <div
@@ -623,6 +638,14 @@ export const DashboardView: React.FC = () => {
  )}
  </div>
  </div>
+
+ {showResetDate && (
+ <div className="flex-1 min-w-[8rem] text-center px-1">
+ <p className="text-[10px] font-semibold theme-text-secondary leading-snug whitespace-normal">
+ Resets on {resetDateText}
+ </p>
+ </div>
+ )}
  
  {/* Right status badge/timer */}
  <div className="text-right flex-shrink-0 flex items-center gap-2">
