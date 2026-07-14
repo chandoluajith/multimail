@@ -38,7 +38,7 @@ export const StatsView: React.FC = () => {
  const serviceRelations = emailServices.filter(es => es.serviceId === service.id);
  const total = serviceRelations.length;
  const available = serviceRelations.filter(es => es.status === 'Available').length;
- const cooling = serviceRelations.filter(es => es.status === 'Cooling Down').length;
+ const cooling = serviceRelations.filter(es => es.status === 'Cooling Down' || es.status === 'Resetting Soon').length;
  const limited = serviceRelations.filter(es => es.status === 'Limit Reached').length;
  
  return {

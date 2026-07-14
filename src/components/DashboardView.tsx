@@ -171,7 +171,7 @@ export const DashboardView: React.FC = () => {
   }, [emailServices, selectedServiceFilter, selectedStatus, filteredEmails]);
 
   const availableRelations = filteredRelations.filter(es => es.status === 'Available').length;
-  const coolingRelations   = filteredRelations.filter(es => es.status === 'Cooling Down').length;
+  const coolingRelations   = filteredRelations.filter(es => es.status === 'Cooling Down' || es.status === 'Resetting Soon').length;
   const limitedRelations   = filteredRelations.filter(es => es.status === 'Limit Reached').length;
   const filteredTotalAccounts = filteredEmails.length;
 
@@ -180,6 +180,7 @@ export const DashboardView: React.FC = () => {
  case 'Available': return 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
  case 'Cooling Down': return 'bg-amber-500/10 border-amber-500/30 text-amber-400';
  case 'Limit Reached': return 'bg-rose-500/10 border-rose-500/30 text-rose-400';
+ case 'Resetting Soon': return 'bg-sky-500/10 border-sky-500/30 text-sky-400';
  default: return 'theme-bg-surface-alt theme-border-subtle theme-text-secondary';
  }
  };
@@ -189,6 +190,7 @@ export const DashboardView: React.FC = () => {
  case 'Available': return 'shadow-emerald-500/5';
  case 'Cooling Down': return 'shadow-amber-500/5';
  case 'Limit Reached': return 'shadow-rose-500/5';
+ case 'Resetting Soon': return 'shadow-sky-500/5';
  default: return '';
  }
  };
@@ -617,7 +619,7 @@ export const DashboardView: React.FC = () => {
  const service = services.find(s => s.id === es.serviceId);
  if (!service) return null;
  const resetDateText = es.estimatedResetTime ? formatResetDate(es.estimatedResetTime) : null;
- const showResetDate = resetDateText && (es.status === 'Cooling Down' || es.status === 'Limit Reached');
+ const showResetDate = resetDateText && (es.status === 'Cooling Down' || es.status === 'Limit Reached' || es.status === 'Resetting Soon');
 
  return (
  <div
@@ -649,11 +651,11 @@ export const DashboardView: React.FC = () => {
  
  {/* Right status badge/timer */}
  <div className="text-right flex-shrink-0 flex items-center gap-2">
- {es.status === 'Cooling Down' || es.status === 'Limit Reached' ? (
+ {es.status === 'Cooling Down' || es.status === 'Limit Reached' || es.status === 'Resetting Soon' ? (
  <div className="flex flex-col items-end">
  <span className="text-[10px] font-bold flex items-center gap-1">
  <Clock size={10} className="animate-spin-slow" />
- {es.status === 'Cooling Down' ? 'Cooldown' : 'Limited'}
+ {es.status === 'Cooling Down' ? 'Cooldown' : es.status === 'Resetting Soon' ? 'Resetting Soon' : 'Limited'}
  </span>
  {es.estimatedResetTime && (
  <CountdownTimer

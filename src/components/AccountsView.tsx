@@ -364,7 +364,7 @@ export const AccountsView: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedEmails.map((email) => {
             const accountRelations = emailServices.filter((es) => es.emailId === email.id);
-            const coolingDown = accountRelations.filter((es) => es.status === 'Cooling Down').length;
+            const coolingDown = accountRelations.filter((es) => es.status === 'Cooling Down' || es.status === 'Resetting Soon').length;
             const limited    = accountRelations.filter((es) => es.status === 'Limit Reached').length;
             const available  = accountRelations.filter((es) => es.status === 'Available').length;
 
@@ -435,6 +435,7 @@ export const AccountsView: React.FC = () => {
                           let colorClass = 'theme-bg-surface-alt theme-text-secondary theme-border';
                           if (rel.status === 'Available')     colorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
                           if (rel.status === 'Cooling Down')  colorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                          if (rel.status === 'Resetting Soon') colorClass = 'bg-sky-500/10 text-sky-400 border-sky-500/20';
                           if (rel.status === 'Limit Reached') colorClass = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
                           return (
                             <span key={s.id} className={`text-[9px] font-bold px-2 py-0.5 rounded border ${colorClass}`}>

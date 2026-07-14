@@ -63,7 +63,7 @@ function serviceRow(s: any): Service {
 function esRow(es: any): EmailService {
   return {
     id: es.id, emailId: es.emailId, serviceId: es.serviceId,
-    status: normalizeStatus(es.status),
+    status: getCooldownLifecycleStatus(es),
     remainingRequests: es.remainingRequests ?? undefined,
     maximumRequests: es.maximumRequests ?? undefined,
     lastUsed: es.lastUsed || undefined,
@@ -97,13 +97,15 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const RECORD_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_COOLDOWN_MINUTES = 52 * 7 * 24 * 60;
+const LIMIT_REACHED_PHASE_RATIO = 0.1;
+const RESETTING_SOON_PHASE_RATIO = 0.15;
 
 function isRecordId(v: unknown): v is string {
   return typeof v === 'string' && RECORD_ID_RE.test(v);
 }
 
 function isCooldownStatus(status: StatusType): boolean {
-  return status === 'Cooling Down' || status === 'Limit Reached';
+  return status === 'Cooling Down' || status === 'Limit Reached' || status === 'Resetting Soon';
 }
 
 function historyId(prefix: string): string {
@@ -125,6 +127,38 @@ function optionalNonNegativeInt(value: unknown, max = 1_000_000): number | undef
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : undefined;
 }
 
+function getCooldownDurationMs(row: { estimatedResetDuration?: number | null; estimatedResetTime?: string | null; lastLimitReached?: string | null }): number | null {
+  if (typeof row.estimatedResetDuration === 'number' && Number.isFinite(row.estimatedResetDuration) && row.estimatedResetDuration > 0) {
+    return row.estimatedResetDuration;
+  }
+
+  if (!row.estimatedResetTime || !row.lastLimitReached) return null;
+  const resetMs = Date.parse(row.estimatedResetTime);
+  const startMs = Date.parse(row.lastLimitReached);
+  if (!Number.isFinite(resetMs) || !Number.isFinite(startMs) || resetMs <= startMs) return null;
+  return resetMs - startMs;
+}
+
+function getCooldownLifecycleStatus(row: { status?: StatusType | string | null; estimatedResetTime?: string | null; estimatedResetDuration?: number | null; lastLimitReached?: string | null }, nowMs = Date.now()): StatusType {
+  const storedStatus = normalizeStatus(row.status);
+  if (!row.estimatedResetTime) {
+    return storedStatus === 'Available' ? 'Available' : storedStatus === 'Unknown' ? 'Unknown' : isCooldownStatus(storedStatus) ? 'Unknown' : storedStatus;
+  }
+
+  const resetMs = Date.parse(row.estimatedResetTime);
+  const durationMs = getCooldownDurationMs(row);
+  if (!Number.isFinite(resetMs) || !durationMs) return 'Unknown';
+  if (resetMs <= nowMs) return 'Available';
+
+  const remainingMs = resetMs - nowMs;
+  const elapsedRatio = Math.max(0, Math.min(1, (durationMs - remainingMs) / durationMs));
+  const remainingRatio = Math.max(0, Math.min(1, remainingMs / durationMs));
+
+  if (elapsedRatio < LIMIT_REACHED_PHASE_RATIO) return 'Limit Reached';
+  if (remainingRatio <= RESETTING_SOON_PHASE_RATIO) return 'Resetting Soon';
+  return 'Cooling Down';
+}
+
 function resetHistoryId(emailServiceId: string, resetTime: string): string {
   const resetMs = Date.parse(resetTime);
   const suffix = Number.isFinite(resetMs) ? resetMs.toString(36) : 'unknown';
@@ -133,7 +167,9 @@ function resetHistoryId(emailServiceId: string, resetTime: string): string {
 }
 
 async function syncExpiredCooldowns(db: D1Database, userId: string, encKey: string): Promise<number> {
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const nowMs = nowDate.getTime();
   const expired = await db.prepare(`
     SELECT
       es.id,
@@ -146,7 +182,7 @@ async function syncExpiredCooldowns(db: D1Database, userId: string, encKey: stri
     JOIN services s ON s.id = es.serviceId AND (s.userId IS NULL OR s.userId = ?)
     WHERE es.userId = ?
       AND es.estimatedResetTime IS NOT NULL
-      AND es.status IN ('Cooling Down', 'Limit Reached')
+      AND es.status != 'Available'
       AND es.estimatedResetTime <= ?
     LIMIT 100
   `).bind(userId, userId, userId, now).all<{
@@ -157,11 +193,8 @@ async function syncExpiredCooldowns(db: D1Database, userId: string, encKey: stri
     serviceName: string;
   }>();
 
-  const rows = expired.results || [];
-  if (rows.length === 0) return 0;
-
   const stmts = [];
-  for (const row of rows) {
+  for (const row of expired.results || []) {
     const plainEmail = await safeDecryptEmail(row.emailAddress, encKey);
     const encryptedHistoryEmail = await encryptEmail(plainEmail, encKey);
 
@@ -184,13 +217,31 @@ async function syncExpiredCooldowns(db: D1Database, userId: string, encKey: stri
             estimatedResetTime=NULL,
             estimatedResetDuration=NULL,
             updatedAt=?
-        WHERE id=? AND userId=? AND estimatedResetTime=? AND status IN ('Cooling Down', 'Limit Reached')`)
+        WHERE id=? AND userId=? AND estimatedResetTime=?`)
         .bind(now, row.id, userId, row.estimatedResetTime),
     );
   }
 
-  await db.batch(stmts);
-  return rows.length;
+  const active = await db.prepare(`
+    SELECT id,status,lastLimitReached,estimatedResetTime,estimatedResetDuration
+    FROM email_services
+    WHERE userId=?
+      AND estimatedResetTime IS NOT NULL
+      AND estimatedResetTime > ?
+  `).bind(userId, now).all<any>();
+
+  for (const row of active.results || []) {
+    const nextStatus = getCooldownLifecycleStatus(row, nowMs);
+    if (nextStatus !== normalizeStatus(row.status)) {
+      stmts.push(
+        db.prepare('UPDATE email_services SET status=?, updatedAt=? WHERE id=? AND userId=?')
+          .bind(nextStatus, now, row.id, userId)
+      );
+    }
+  }
+
+  if (stmts.length > 0) await db.batch(stmts);
+  return stmts.length;
 }
 
 async function getRelationContext(db: D1Database, userId: string, emailId: string, serviceId: string) {

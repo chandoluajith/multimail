@@ -24,7 +24,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
  // Compute status counts
  const availableCount = emailServices.filter(es => es.status === 'Available').length;
- const cooldownCount = emailServices.filter(es => es.status === 'Cooling Down').length;
+ const cooldownCount = emailServices.filter(es => es.status === 'Cooling Down' || es.status === 'Resetting Soon').length;
  const limitCount = emailServices.filter(es => es.status === 'Limit Reached').length;
 
  const tabs = [

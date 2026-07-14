@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { Email, Service, EmailService, UsageHistory, AppSettings, StatusType, ProviderType, CooldownUnit } from '../types';
 import { DEFAULT_SERVICES, DEFAULT_SETTINGS, MOCK_EMAILS, MOCK_EMAIL_SERVICES, MOCK_HISTORY } from '../mockData';
 import { api } from '../services/api';
@@ -7,6 +7,32 @@ import { useTheme } from './ThemeContext';
 
 type DbStatus = 'checking' | 'connected' | 'error';
 type AppData = Awaited<ReturnType<typeof api.getAllData>>;
+const LIMIT_REACHED_PHASE_RATIO = 0.1;
+const RESETTING_SOON_PHASE_RATIO = 0.15;
+
+function getCooldownDurationMs(relation: EmailService): number | null {
+  if (relation.estimatedResetDuration && relation.estimatedResetDuration > 0) return relation.estimatedResetDuration;
+  if (!relation.estimatedResetTime || !relation.lastLimitReached) return null;
+  const resetMs = Date.parse(relation.estimatedResetTime);
+  const startMs = Date.parse(relation.lastLimitReached);
+  if (!Number.isFinite(resetMs) || !Number.isFinite(startMs) || resetMs <= startMs) return null;
+  return resetMs - startMs;
+}
+
+function getNextCooldownLifecycleBoundary(relation: EmailService, nowMs = Date.now()): number | null {
+  if (!relation.estimatedResetTime) return null;
+  const resetMs = Date.parse(relation.estimatedResetTime);
+  const durationMs = getCooldownDurationMs(relation);
+  if (!Number.isFinite(resetMs) || !durationMs || resetMs <= nowMs) return resetMs;
+
+  const startMs = resetMs - durationMs;
+  const limitReachedEndsAt = startMs + durationMs * LIMIT_REACHED_PHASE_RATIO;
+  const resettingSoonStartsAt = resetMs - durationMs * RESETTING_SOON_PHASE_RATIO;
+
+  if (nowMs < limitReachedEndsAt) return limitReachedEndsAt;
+  if (nowMs < resettingSoonStartsAt) return resettingSoonStartsAt;
+  return resetMs;
+}
 
 interface AppContextType {
   emails: Email[];
@@ -61,6 +87,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
   const [syncError, setSyncError] = useState<string | null>(null);
   const [serverNow, setServerNow] = useState<string | undefined>(undefined);
+  const serverClockAnchorRef = useRef({ serverMs: Date.now(), performanceMs: 0 });
 
   const applyServerData = useCallback((data: AppData) => {
     const serverSettings = data.settings ?? DEFAULT_SETTINGS;
@@ -70,6 +97,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setHistory(data.history);
     setSettings(serverSettings);
     setServerNow(data.serverNow);
+    const serverMs = Date.parse(data.serverNow);
+    serverClockAnchorRef.current = {
+      serverMs: Number.isFinite(serverMs) ? serverMs : Date.now(),
+      performanceMs: typeof performance !== 'undefined' ? performance.now() : 0,
+    };
     setTheme(serverSettings.theme);
   }, [setTheme]);
 
@@ -80,6 +112,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setHistory([]);
     setSettings(DEFAULT_SETTINGS);
     setServerNow(undefined);
+    serverClockAnchorRef.current = { serverMs: Date.now(), performanceMs: 0 };
     setTheme(DEFAULT_SETTINGS.theme);
     setSyncError(null);
   }, [setTheme]);
@@ -216,19 +249,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!mounted) return;
-    const nextReset = emailServices
-      .filter((es) => es.estimatedResetTime && (es.status === 'Cooling Down' || es.status === 'Limit Reached'))
-      .map((es) => Date.parse(es.estimatedResetTime!))
+    const anchor = serverClockAnchorRef.current;
+    const nowMs = anchor.serverMs + (typeof performance !== 'undefined' ? Math.max(0, performance.now() - anchor.performanceMs) : 0);
+    const nextBoundary = emailServices
+      .filter((es) => es.estimatedResetTime && (es.status === 'Cooling Down' || es.status === 'Limit Reached' || es.status === 'Resetting Soon'))
+      .map((es) => getNextCooldownLifecycleBoundary(es, nowMs))
+      .filter((value): value is number => value !== null)
       .filter(Number.isFinite)
       .sort((a, b) => a - b)[0];
-    if (!nextReset) return;
+    if (!nextBoundary) return;
 
-    const delay = Math.max(1000, nextReset - Date.now() + 1000);
+    const delay = Math.max(1000, nextBoundary - nowMs + 1000);
     const timer = window.setTimeout(() => {
       refreshFromServer().catch((error) => reportSyncFailure('Database sync failed', error));
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [emailServices, mounted, refreshFromServer, reportSyncFailure]);
+  }, [emailServices, mounted, refreshFromServer, reportSyncFailure, serverNow]);
 
   // ── Helper ────────────────────────────────────────────────────────────────
   const getServiceCooldownMinutes = (serviceId: string): number => {
@@ -399,7 +435,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (current) {
       let estimatedResetTime: string | undefined;
       let estimatedResetDuration: number | undefined;
-      const isCooldownStatus = status === 'Cooling Down' || status === 'Limit Reached';
+      const isCooldownStatus = status === 'Cooling Down' || status === 'Limit Reached' || status === 'Resetting Soon';
 
       if (isCooldownStatus && overrideResetTime) {
         const resetMs = Date.parse(overrideResetTime);
