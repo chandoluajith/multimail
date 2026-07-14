@@ -17,6 +17,8 @@ import {
  Layers,
  Mail,
  BarChart3,
+ ChevronDown,
+ ArrowUpDown,
  Sun,
  Moon,
  Database
@@ -24,11 +26,22 @@ import {
 import { StatusType, ProviderType } from '../types';
 import { useTheme } from '../context/ThemeContext';
 
+type DashboardSort = 'alphabetical' | 'most-used' | 'least-used' | 'recently-used' | 'recently-added';
+
+const sortOptions: Array<{ value: DashboardSort; label: string }> = [
+  { value: 'alphabetical', label: 'Alphabetical' },
+  { value: 'most-used', label: 'Most Used' },
+  { value: 'least-used', label: 'Least Used' },
+  { value: 'recently-used', label: 'Recently Used' },
+  { value: 'recently-added', label: 'Recently Added' },
+];
+
 export const DashboardView: React.FC = () => {
  const { 
  emails, 
  services, 
  emailServices, 
+ history,
  startSession, 
  endSession, 
  reachLimit, 
@@ -44,6 +57,7 @@ export const DashboardView: React.FC = () => {
  const [selectedProvider, setSelectedProvider] = useState<ProviderType | 'All'>('All');
  const [selectedStatus, setSelectedStatus] = useState<StatusType | 'All'>('All');
  const [selectedServiceFilter, setSelectedServiceFilter] = useState<string>('All');
+ const [sortBy, setSortBy] = useState<DashboardSort>('alphabetical');
  
  // Selected Email & Service for the Quick Actions Modal
  const [activeControl, setActiveControl] = useState<{ emailId: string; serviceId: string } | null>(null);
@@ -72,6 +86,38 @@ export const DashboardView: React.FC = () => {
 
  // Filter emails based on query and filters
  const filteredEmails = useMemo(() => {
+  const relationEmailById = new Map(emailServices.map((es) => [es.id, es.emailId]));
+  const usageCountByEmail = new Map<string, number>();
+  const lastUsedByEmail = new Map<string, number>();
+
+  history.forEach((item) => {
+    const emailId = relationEmailById.get(item.emailServiceId);
+    if (!emailId) return;
+    usageCountByEmail.set(emailId, (usageCountByEmail.get(emailId) ?? 0) + 1);
+    const timestamp = new Date(item.timestamp).getTime();
+    if (!Number.isNaN(timestamp)) {
+      lastUsedByEmail.set(emailId, Math.max(lastUsedByEmail.get(emailId) ?? 0, timestamp));
+    }
+  });
+
+  emailServices.forEach((relation) => {
+    if (!relation.lastUsed) return;
+    const timestamp = new Date(relation.lastUsed).getTime();
+    if (!Number.isNaN(timestamp)) {
+      lastUsedByEmail.set(relation.emailId, Math.max(lastUsedByEmail.get(relation.emailId) ?? 0, timestamp));
+    }
+  });
+
+  const toTime = (value?: string) => {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  };
+
+  const alphabetical = (a: typeof emails[number], b: typeof emails[number]) =>
+    (a.nickname || a.email).localeCompare(b.nickname || b.email, undefined, { sensitivity: 'base' }) ||
+    a.email.localeCompare(b.email, undefined, { sensitivity: 'base' });
+
   return emails.filter(email => {
     const matchesSearch = 
     email.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -91,8 +137,22 @@ export const DashboardView: React.FC = () => {
     const needsRelationFilter = selectedServiceFilter !== 'All' || selectedStatus !== 'All';
     
     return matchesSearch && matchesProvider && (!needsRelationFilter || matchesServiceAndStatus);
+  }).sort((a, b) => {
+    if (sortBy === 'most-used') {
+      return (usageCountByEmail.get(b.id) ?? 0) - (usageCountByEmail.get(a.id) ?? 0) || alphabetical(a, b);
+    }
+    if (sortBy === 'least-used') {
+      return (usageCountByEmail.get(a.id) ?? 0) - (usageCountByEmail.get(b.id) ?? 0) || alphabetical(a, b);
+    }
+    if (sortBy === 'recently-used') {
+      return (lastUsedByEmail.get(b.id) ?? 0) - (lastUsedByEmail.get(a.id) ?? 0) || alphabetical(a, b);
+    }
+    if (sortBy === 'recently-added') {
+      return toTime(b.createdAt) - toTime(a.createdAt) || alphabetical(a, b);
+    }
+    return alphabetical(a, b);
   });
- }, [emails, emailServices, searchQuery, selectedProvider, selectedServiceFilter, selectedStatus]);
+ }, [emails, emailServices, history, searchQuery, selectedProvider, selectedServiceFilter, selectedStatus, sortBy]);
 
   // Status counters – computed AFTER filters so KPI cards reflect current view
   const totalEmails = emails.length;
@@ -461,24 +521,41 @@ export const DashboardView: React.FC = () => {
  {/* Subtle divider */}
  <div className="border-t theme-border-subtle" />
 
- {/* ── Provider Filter Chips ── */}
- <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
- <motion.button
- whileTap={{ scale: 0.93 }}
- onClick={() => setSelectedProvider('All')}
- className={`${chipBase} ${selectedProvider === 'All' ? chipSelectedStyle.violet : chipUnselected}`}
+ {/* ── Provider Filter Dropdown ── */}
+ <div className="flex items-center">
+ <label className="relative flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-2 min-w-[220px]">
+ <Mail size={14} className="theme-text-muted" />
+ <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
+ <select
+ value={selectedProvider}
+ onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
+ className="flex-1 appearance-none bg-transparent pr-6 text-sm theme-text-secondary font-semibold focus:outline-none cursor-pointer"
  >
- <Mail size={13} />
- <span>All Providers</span>
- </motion.button>
+ <option value="All" className="theme-bg-primary theme-text-secondary">All Providers</option>
  {providerList.map(provider => (
+ <option key={provider} value={provider} className="theme-bg-primary theme-text-secondary">
+ {provider}
+ </option>
+ ))}
+ </select>
+ <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 theme-text-secondary pointer-events-none" />
+ </label>
+ </div>
+
+ {/* Subtle divider */}
+ <div className="border-t theme-border-subtle" />
+
+ {/* ── Sort Filter Chips ── */}
+ <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
+ {sortOptions.map((option) => (
  <motion.button
- key={provider}
+ key={option.value}
  whileTap={{ scale: 0.93 }}
- onClick={() => setSelectedProvider(provider)}
- className={`${chipBase} ${selectedProvider === provider ? chipSelectedStyle.violet : chipUnselected}`}
+ onClick={() => setSortBy(option.value)}
+ className={`${chipBase} ${sortBy === option.value ? chipSelectedStyle.violet : chipUnselected}`}
  >
- <span>{provider}</span>
+ {option.value === 'alphabetical' && <ArrowUpDown size={13} />}
+ <span>{option.label}</span>
  </motion.button>
  ))}
  </div>

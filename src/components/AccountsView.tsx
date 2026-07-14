@@ -15,6 +15,7 @@ import {
   Zap,
   ArrowUpDown,
   ChevronDown,
+  Layers,
 } from 'lucide-react';
 import { ProviderType, Email, StatusType } from '../types';
 import { ServiceIcon } from './ServiceIcon';
@@ -24,6 +25,13 @@ type AccountStatusFilter = StatusType | 'All';
 
 const providerList: ProviderType[] = ['Gmail', 'Outlook', 'Proton', 'Yahoo', 'Custom'];
 const statusList: StatusType[] = ['Available', 'Cooling Down', 'Limit Reached', 'Resetting Soon', 'Unknown'];
+const sortOptions: Array<{ value: AccountSort; label: string }> = [
+  { value: 'alphabetical', label: 'Alphabetical' },
+  { value: 'most-used', label: 'Most Used' },
+  { value: 'least-used', label: 'Least Used' },
+  { value: 'recently-used', label: 'Recently Used' },
+  { value: 'recently-added', label: 'Recently Added' },
+];
 
 const chipBase = 'flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-xs font-semibold cursor-pointer select-none whitespace-nowrap transition-all duration-200';
 
@@ -61,6 +69,7 @@ export const AccountsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<ProviderType | 'All'>('All');
   const [selectedStatus, setSelectedStatus] = useState<AccountStatusFilter>('All');
+  const [selectedServiceFilter, setSelectedServiceFilter] = useState<string>('All');
   const [sortBy, setSortBy] = useState<AccountSort>('alphabetical');
 
   // Modal states
@@ -190,10 +199,13 @@ export const AccountsView: React.FC = () => {
           email.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
           email.nickname.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesProvider = selectedProvider === 'All' || email.provider === selectedProvider;
+        const matchesService =
+          selectedServiceFilter === 'All' ||
+          emailServices.some((relation) => relation.emailId === email.id && relation.serviceId === selectedServiceFilter);
         const matchesStatus =
           selectedStatus === 'All' ||
           emailServices.some((relation) => relation.emailId === email.id && relation.status === selectedStatus);
-        return matchesSearch && matchesProvider && matchesStatus;
+        return matchesSearch && matchesProvider && matchesService && matchesStatus;
       })
       .sort((a, b) => {
         if (sortBy === 'most-used') {
@@ -210,7 +222,7 @@ export const AccountsView: React.FC = () => {
         }
         return alphabetical(a, b);
       });
-  }, [emails, emailServices, history, searchQuery, selectedProvider, selectedStatus, sortBy]);
+  }, [emails, emailServices, history, searchQuery, selectedProvider, selectedServiceFilter, selectedStatus, sortBy]);
 
   const getProviderBg = (prov: ProviderType) => {
     switch (prov) {
@@ -253,21 +265,48 @@ export const AccountsView: React.FC = () => {
             />
           </div>
           <label className="relative flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-2 self-start lg:self-auto min-w-[220px]">
-            <ArrowUpDown size={14} className="theme-text-muted" />
-            <span className="text-xs theme-text-muted font-semibold uppercase">Sort:</span>
+            <Mail size={14} className="theme-text-muted" />
+            <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
             <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as AccountSort)}
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
               className="flex-1 appearance-none bg-transparent pr-6 text-sm theme-text-secondary font-semibold focus:outline-none cursor-pointer"
             >
-              <option value="alphabetical" className="theme-bg-primary theme-text-secondary">Alphabetical</option>
-              <option value="most-used" className="theme-bg-primary theme-text-secondary">Most Used</option>
-              <option value="least-used" className="theme-bg-primary theme-text-secondary">Least Used</option>
-              <option value="recently-used" className="theme-bg-primary theme-text-secondary">Recently Used</option>
-              <option value="recently-added" className="theme-bg-primary theme-text-secondary">Recently Added</option>
+              <option value="All" className="theme-bg-primary theme-text-secondary">All Providers</option>
+              {providerList.map((providerName) => (
+                <option key={providerName} value={providerName} className="theme-bg-primary theme-text-secondary">
+                  {providerName}
+                </option>
+              ))}
             </select>
             <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 theme-text-secondary pointer-events-none" />
           </label>
+        </div>
+
+        <div className="border-t theme-border-subtle" />
+
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.93 }}
+            onClick={() => setSelectedServiceFilter('All')}
+            className={`${chipBase} ${selectedServiceFilter === 'All' ? chipSelectedStyle.blue : chipUnselected}`}
+          >
+            <Layers size={13} />
+            <span>All Services</span>
+          </motion.button>
+          {services.map((service) => (
+            <motion.button
+              key={service.id}
+              type="button"
+              whileTap={{ scale: 0.93 }}
+              onClick={() => setSelectedServiceFilter(service.id)}
+              className={`${chipBase} ${selectedServiceFilter === service.id ? chipSelectedStyle.blue : chipUnselected}`}
+            >
+              <ServiceIcon name={service.icon} size={13} />
+              <span>{service.name}</span>
+            </motion.button>
+          ))}
         </div>
 
         <div className="border-t theme-border-subtle" />
@@ -299,24 +338,16 @@ export const AccountsView: React.FC = () => {
         <div className="border-t theme-border-subtle" />
 
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.93 }}
-            onClick={() => setSelectedProvider('All')}
-            className={`${chipBase} ${selectedProvider === 'All' ? chipSelectedStyle.violet : chipUnselected}`}
-          >
-            <Mail size={13} />
-            <span>All Providers</span>
-          </motion.button>
-          {providerList.map((providerName) => (
+          {sortOptions.map((option) => (
             <motion.button
-              key={providerName}
+              key={option.value}
               type="button"
               whileTap={{ scale: 0.93 }}
-              onClick={() => setSelectedProvider(providerName)}
-              className={`${chipBase} ${selectedProvider === providerName ? chipSelectedStyle.violet : chipUnselected}`}
+              onClick={() => setSortBy(option.value)}
+              className={`${chipBase} ${sortBy === option.value ? chipSelectedStyle.violet : chipUnselected}`}
             >
-              <span>{providerName}</span>
+              {option.value === 'alphabetical' && <ArrowUpDown size={13} />}
+              <span>{option.label}</span>
             </motion.button>
           ))}
         </div>
