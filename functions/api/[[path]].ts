@@ -95,6 +95,36 @@ const DEFAULT_SETTINGS: AppSettings = {
   timeFormat: '12h', defaultCooldownDuration: 3, defaultStatus: 'Unknown',
 };
 
+const RECORD_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const MAX_COOLDOWN_MINUTES = 52 * 7 * 24 * 60;
+
+function isRecordId(v: unknown): v is string {
+  return typeof v === 'string' && RECORD_ID_RE.test(v);
+}
+
+function isCooldownStatus(status: StatusType): boolean {
+  return status === 'Cooling Down' || status === 'Limit Reached';
+}
+
+function historyId(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID()}`.slice(0, 128);
+}
+
+function serviceCooldownMinutes(service: { defaultCooldownValue?: number | null; defaultCooldownUnit?: CooldownUnit | null }, fallbackHours = 3): number {
+  const value = service.defaultCooldownValue ?? fallbackHours;
+  switch (service.defaultCooldownUnit) {
+    case 'minutes': return value;
+    case 'hours': return value * 60;
+    case 'days': return value * 60 * 24;
+    case 'weeks': return value * 60 * 24 * 7;
+    default: return fallbackHours * 60;
+  }
+}
+
+function optionalNonNegativeInt(value: unknown, max = 1_000_000): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max ? value : undefined;
+}
+
 function resetHistoryId(emailServiceId: string, resetTime: string): string {
   const resetMs = Date.parse(resetTime);
   const suffix = Number.isFinite(resetMs) ? resetMs.toString(36) : 'unknown';
@@ -161,6 +191,45 @@ async function syncExpiredCooldowns(db: D1Database, userId: string, encKey: stri
 
   await db.batch(stmts);
   return rows.length;
+}
+
+async function getRelationContext(db: D1Database, userId: string, emailId: string, serviceId: string) {
+  return db.prepare(`
+    SELECT
+      es.*,
+      e.nickname AS emailNickname,
+      e.email AS encryptedEmailAddress,
+      s.name AS serviceName,
+      s.defaultCooldownValue AS serviceCooldownValue,
+      s.defaultCooldownUnit AS serviceCooldownUnit
+    FROM email_services es
+    JOIN emails e ON e.id = es.emailId AND e.userId = ?
+    JOIN services s ON s.id = es.serviceId AND (s.userId IS NULL OR s.userId = ?)
+    WHERE es.userId = ? AND es.emailId = ? AND es.serviceId = ?
+  `).bind(userId, userId, userId, emailId, serviceId).first<any>();
+}
+
+async function insertHistory(
+  db: D1Database,
+  userId: string,
+  row: any,
+  event: UsageHistory['event'],
+  timestamp: string,
+  notes?: string,
+) {
+  await db.prepare('INSERT INTO usage_history (id,userId,emailServiceId,emailNickname,emailAddress,serviceName,event,timestamp,notes) VALUES (?,?,?,?,?,?,?,?,?)')
+    .bind(
+      historyId('hist'),
+      userId,
+      row.id,
+      row.emailNickname,
+      row.encryptedEmailAddress,
+      row.serviceName,
+      event,
+      timestamp,
+      notes ?? null,
+    )
+    .run();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,12 +353,12 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
     return tooManyRequests(uRl.resetIn, h, uRl.limit);
   }
 
+  const encKey = env.ENCRYPT_SECRET || env.JWT_SECRET;
+  await syncExpiredCooldowns(db, userId, encKey);
+
   try {
     // ── GET /api/data ────────────────────────────────────────────────────
     if (method === 'GET' && segments[0] === 'data') {
-      const encKey = env.ENCRYPT_SECRET || env.JWT_SECRET;
-      await syncExpiredCooldowns(db, userId, encKey);
-
       const [eRes, sRes, esRes, hRes, stRes] = await Promise.all([
         db.prepare('SELECT * FROM emails WHERE userId=?').bind(userId).all<any>(),
         db.prepare('SELECT * FROM services WHERE userId IS NULL OR userId=?').bind(userId).all<any>(),
@@ -323,6 +392,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         emailServices: (esRes.results || []).map(esRow),
         history,
         settings,
+        serverNow: new Date().toISOString(),
       }), { headers: h });
     }
 
@@ -569,9 +639,181 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
       return new Response(JSON.stringify({ success: true }), { headers: h });
     }
 
+    // ── /api/actions/update-status ───────────────────────────────────────
+    if (segments[0] === 'actions' && segments[1] === 'update-status' && method === 'POST') {
+      const body = await request.json() as {
+        emailId?: string;
+        serviceId?: string;
+        status?: StatusType;
+        cooldownMinutes?: number;
+        remainingRequests?: number;
+        maximumRequests?: number;
+        notes?: string;
+        overrideResetTime?: string;
+      };
+
+      if (!isRecordId(body.emailId) || !isRecordId(body.serviceId)) return badRequest('Invalid emailId or serviceId', h);
+      const status = normalizeStatus(body.status);
+      if (!['Available', 'Cooling Down', 'Limit Reached', 'Resetting Soon', 'Unknown'].includes(status)) return badRequest('Invalid status', h);
+      if (body.notes !== undefined && (typeof body.notes !== 'string' || body.notes.length > 1000)) return badRequest('Invalid notes', h);
+
+      const row = await getRelationContext(db, userId, body.emailId, body.serviceId);
+      if (!row) {
+        ctx.waitUntil(logRequest(db, request, 'idor_attempt', clientIp, {
+          severity: 'critical', userId,
+          details: { resource: 'email_services', action: 'update-status', emailId: body.emailId, serviceId: body.serviceId },
+        }));
+        return new Response(JSON.stringify({ error: 'Forbidden: email service not owned by user' }), { status: 403, headers: h });
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const nowMs = now.getTime();
+      if (body.maximumRequests !== undefined && optionalNonNegativeInt(body.maximumRequests) === undefined) return badRequest('Invalid maximumRequests', h);
+      if (body.remainingRequests !== undefined && optionalNonNegativeInt(body.remainingRequests) === undefined) return badRequest('Invalid remainingRequests', h);
+      if (body.cooldownMinutes !== undefined && optionalNonNegativeInt(body.cooldownMinutes, MAX_COOLDOWN_MINUTES) === undefined) return badRequest('Invalid cooldownMinutes', h);
+
+      const maximumRequests = optionalNonNegativeInt(body.maximumRequests) ?? row.maximumRequests;
+      let remainingRequests = body.remainingRequests !== undefined ? optionalNonNegativeInt(body.remainingRequests) : row.remainingRequests;
+      let nextStatus = status;
+      let estimatedResetTime: string | null = null;
+      let estimatedResetDuration: number | null = null;
+      let lastLimitReached: string | null = row.lastLimitReached ?? null;
+
+      if (isCooldownStatus(status)) {
+        let resetMs: number | undefined;
+        if (body.overrideResetTime) {
+          const parsed = Date.parse(body.overrideResetTime);
+          if (!Number.isFinite(parsed)) return badRequest('Invalid overrideResetTime', h);
+          resetMs = parsed;
+        } else {
+          const requestedMinutes = optionalNonNegativeInt(body.cooldownMinutes, MAX_COOLDOWN_MINUTES);
+          const minutes = requestedMinutes && requestedMinutes > 0
+            ? Math.min(requestedMinutes, MAX_COOLDOWN_MINUTES)
+            : Math.min(serviceCooldownMinutes({
+                defaultCooldownValue: row.serviceCooldownValue,
+                defaultCooldownUnit: row.serviceCooldownUnit,
+              }), MAX_COOLDOWN_MINUTES);
+          resetMs = nowMs + minutes * 60 * 1000;
+        }
+
+        lastLimitReached = nowIso;
+        if (resetMs <= nowMs) {
+          nextStatus = 'Available';
+          remainingRequests = maximumRequests;
+        } else {
+          estimatedResetTime = new Date(resetMs).toISOString();
+          estimatedResetDuration = resetMs - nowMs;
+        }
+      } else if (status === 'Available') {
+        remainingRequests = body.remainingRequests !== undefined ? remainingRequests : maximumRequests;
+      }
+
+      await db.prepare(`
+        UPDATE email_services
+        SET status=?,
+            remainingRequests=?,
+            maximumRequests=?,
+            lastLimitReached=?,
+            estimatedResetTime=?,
+            estimatedResetDuration=?,
+            notes=?,
+            updatedAt=?
+        WHERE id=? AND userId=?
+      `).bind(
+        nextStatus,
+        remainingRequests ?? null,
+        maximumRequests ?? null,
+        lastLimitReached,
+        estimatedResetTime,
+        estimatedResetDuration,
+        body.notes ?? row.notes ?? null,
+        nowIso,
+        row.id,
+        userId,
+      ).run();
+
+      if (row.status !== nextStatus) {
+        await insertHistory(
+          db,
+          userId,
+          row,
+          status === 'Limit Reached' ? 'Reached Limit' : 'Status Changed',
+          nowIso,
+          body.notes || `Manual status update: ${normalizeStatus(row.status)} -> ${nextStatus}`,
+        );
+      }
+
+      await syncExpiredCooldowns(db, userId, encKey);
+      return new Response(JSON.stringify({ success: true, serverNow: new Date().toISOString() }), { headers: h });
+    }
+
+    // ── /api/actions/start-session ───────────────────────────────────────
+    if (segments[0] === 'actions' && segments[1] === 'start-session' && method === 'POST') {
+      const body = await request.json() as { emailId?: string; serviceId?: string };
+      if (!isRecordId(body.emailId) || !isRecordId(body.serviceId)) return badRequest('Invalid emailId or serviceId', h);
+
+      const row = await getRelationContext(db, userId, body.emailId, body.serviceId);
+      if (!row) {
+        ctx.waitUntil(logRequest(db, request, 'idor_attempt', clientIp, {
+          severity: 'critical', userId,
+          details: { resource: 'email_services', action: 'start-session', emailId: body.emailId, serviceId: body.serviceId },
+        }));
+        return new Response(JSON.stringify({ error: 'Forbidden: email service not owned by user' }), { status: 403, headers: h });
+      }
+
+      const nowIso = new Date().toISOString();
+      const nextRemaining = typeof row.remainingRequests === 'number'
+        ? Math.max(0, row.remainingRequests - 1)
+        : null;
+      await db.prepare('UPDATE email_services SET lastUsed=?, remainingRequests=?, updatedAt=? WHERE id=? AND userId=?')
+        .bind(nowIso, nextRemaining, nowIso, row.id, userId)
+        .run();
+      await insertHistory(
+        db,
+        userId,
+        row,
+        'Started Session',
+        nowIso,
+        `Started usage session.${nextRemaining !== null ? ` Remaining: ${nextRemaining}` : ''}`,
+      );
+      return new Response(JSON.stringify({ success: true, serverNow: nowIso }), { headers: h });
+    }
+
+    // ── /api/actions/reset-timer ─────────────────────────────────────────
+    if (segments[0] === 'actions' && segments[1] === 'reset-timer' && method === 'POST') {
+      const body = await request.json() as { emailId?: string; serviceId?: string };
+      if (!isRecordId(body.emailId) || !isRecordId(body.serviceId)) return badRequest('Invalid emailId or serviceId', h);
+
+      const row = await getRelationContext(db, userId, body.emailId, body.serviceId);
+      if (!row) {
+        ctx.waitUntil(logRequest(db, request, 'idor_attempt', clientIp, {
+          severity: 'critical', userId,
+          details: { resource: 'email_services', action: 'reset-timer', emailId: body.emailId, serviceId: body.serviceId },
+        }));
+        return new Response(JSON.stringify({ error: 'Forbidden: email service not owned by user' }), { status: 403, headers: h });
+      }
+
+      const nowIso = new Date().toISOString();
+      await db.prepare(`
+        UPDATE email_services
+        SET status='Available',
+            remainingRequests=maximumRequests,
+            estimatedResetTime=NULL,
+            estimatedResetDuration=NULL,
+            updatedAt=?
+        WHERE id=? AND userId=?
+      `).bind(nowIso, row.id, userId).run();
+
+      if (isCooldownStatus(normalizeStatus(row.status))) {
+        await insertHistory(db, userId, row, 'Reset Completed', nowIso, 'Timer manually reset. Status changed to Available.');
+      }
+
+      return new Response(JSON.stringify({ success: true, serverNow: nowIso }), { headers: h });
+    }
+
     // ── /api/actions/sync-expired ─────────────────────────────────────────
     if (segments[0] === 'actions' && segments[1] === 'sync-expired' && method === 'POST') {
-      const encKey = env.ENCRYPT_SECRET || env.JWT_SECRET;
       const synced = await syncExpiredCooldowns(db, userId, encKey);
       return new Response(JSON.stringify({ success: true, synced }), { headers: h });
     }

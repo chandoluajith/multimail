@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Email, Service, EmailService, UsageHistory, AppSettings, StatusType, ProviderType, CooldownUnit } from '../types';
 import { DEFAULT_SERVICES, DEFAULT_SETTINGS, MOCK_EMAILS, MOCK_EMAIL_SERVICES, MOCK_HISTORY } from '../mockData';
 import { api } from '../services/api';
@@ -17,6 +17,7 @@ interface AppContextType {
   isLoading: boolean;
   dbStatus: DbStatus;
   syncError: string | null;
+  serverNow?: string;
   addEmail: (email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => Promise<void>;
   deleteEmail: (id: string) => Promise<void>;
   updateEmail: (id: string, email: string, nickname: string, provider: ProviderType, serviceIds?: string[]) => Promise<void>;
@@ -59,6 +60,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [mounted, setMounted] = useState(false);
   const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [serverNow, setServerNow] = useState<string | undefined>(undefined);
 
   const applyServerData = useCallback((data: AppData) => {
     const serverSettings = data.settings ?? DEFAULT_SETTINGS;
@@ -67,6 +69,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEmailServices(data.emailServices);
     setHistory(data.history);
     setSettings(serverSettings);
+    setServerNow(data.serverNow);
     setTheme(serverSettings.theme);
   }, [setTheme]);
 
@@ -76,6 +79,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setEmailServices([]);
     setHistory([]);
     setSettings(DEFAULT_SETTINGS);
+    setServerNow(undefined);
     setTheme(DEFAULT_SETTINGS.theme);
     setSyncError(null);
   }, [setTheme]);
@@ -128,14 +132,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('AudioContext not supported', e);
     }
   }, []);
-
-  const triggerNotification = useCallback((title: string, body: string, soundType: 'complete' | 'limit' = 'complete') => {
-    if (typeof window === 'undefined') return;
-    playSound(soundType);
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/favicon.ico' });
-    }
-  }, [playSound]);
 
   // ── Request notification permission ──────────────────────────────────────
   useEffect(() => {
@@ -194,59 +190,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [applyServerData, isAuthLoading, resetClientData, user]);
 
-  // ── Refs for background timer ─────────────────────────────────────────────
-  const emailsRef = useRef(emails);
-  const servicesRef = useRef(services);
-  const emailServicesRef = useRef(emailServices);
-  const settingsRef = useRef(settings);
-  const syncExpiredInFlightRef = useRef(false);
-
-  useEffect(() => { emailsRef.current = emails; }, [emails]);
-  useEffect(() => { servicesRef.current = services; }, [services]);
-  useEffect(() => { emailServicesRef.current = emailServices; }, [emailServices]);
-  useEffect(() => { settingsRef.current = settings; }, [settings]);
-
-  // ── Background cooldown timer ─────────────────────────────────────────────
+  // ── Server-truth cooldown refreshes ───────────────────────────────────────
+  // The database remains authoritative. These browser events only decide when
+  // to re-fetch canonical state after inactivity, reconnection, or tab focus.
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (!mounted) return;
-      const now = new Date();
+    if (!mounted || typeof window === 'undefined') return;
 
-      const expired = emailServicesRef.current.filter((es) =>
-        es.estimatedResetTime &&
-        (es.status === 'Cooling Down' || es.status === 'Limit Reached') &&
-        now >= new Date(es.estimatedResetTime)
-      );
+    const refresh = () => {
+      refreshFromServer().catch((error) => reportSyncFailure('Database sync failed', error));
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
 
-      if (expired.length === 0 || syncExpiredInFlightRef.current) return;
-      syncExpiredInFlightRef.current = true;
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
 
-      api.syncExpiredCooldowns()
-        .then(async () => {
-          if (settingsRef.current.notifications.cooldownFinished) {
-            expired.forEach((es) => {
-              const emailObj = emailsRef.current.find((e) => e.id === es.emailId);
-              const serviceObj = servicesRef.current.find((s) => s.id === es.serviceId);
-              const nickname = emailObj?.nickname ?? 'Account';
-              const emailAddr = emailObj?.email ?? 'unknown';
-              const servName = serviceObj?.name ?? 'Service';
-              triggerNotification(`${servName} Ready`, `Account ${nickname} (${emailAddr}) cooldown finished.`, 'complete');
-            });
-          }
-          await refreshFromServer();
-        })
-        .catch((error) => {
-          console.error('Failed to sync expired cooldowns', error);
-          setDbStatus('error');
-          setSyncError(error instanceof Error ? error.message : 'Database sync failed');
-        })
-        .finally(() => {
-          syncExpiredInFlightRef.current = false;
-        });
-    }, 1000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [mounted, refreshFromServer, reportSyncFailure]);
 
-    return () => clearInterval(timer);
-  }, [mounted, refreshFromServer, triggerNotification]);
+  useEffect(() => {
+    if (!mounted) return;
+    const nextReset = emailServices
+      .filter((es) => es.estimatedResetTime && (es.status === 'Cooling Down' || es.status === 'Limit Reached'))
+      .map((es) => Date.parse(es.estimatedResetTime!))
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)[0];
+    if (!nextReset) return;
+
+    const delay = Math.max(1000, nextReset - Date.now() + 1000);
+    const timer = window.setTimeout(() => {
+      refreshFromServer().catch((error) => reportSyncFailure('Database sync failed', error));
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [emailServices, mounted, refreshFromServer, reportSyncFailure]);
 
   // ── Helper ────────────────────────────────────────────────────────────────
   const getServiceCooldownMinutes = (serviceId: string): number => {
@@ -404,47 +386,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // Propagate cooldown changes to active cooldowns
-    if (cooldownPolicy?.defaultCooldownValue && cooldownPolicy?.defaultCooldownUnit) {
-      const newMinutes = (() => {
-        const v = cooldownPolicy.defaultCooldownValue!;
-        switch (cooldownPolicy.defaultCooldownUnit!) {
-          case 'minutes': return v;
-          case 'hours':   return v * 60;
-          case 'days':    return v * 60 * 24;
-          case 'weeks':   return v * 60 * 24 * 7;
-          default:        return v * 60;
-        }
-      })();
-      const newDurationMs = newMinutes * 60 * 1000;
-
-      const updatedRelations = emailServices.map((es) => {
-        if (es.serviceId !== id) return es;
-        if (es.status !== 'Cooling Down' && es.status !== 'Limit Reached') return es;
-        if (!es.estimatedResetTime) return es;
-
-        const resetTime = new Date(es.estimatedResetTime).getTime();
-        const originalDuration = es.estimatedResetDuration || (settings.defaultCooldownDuration * 60 * 60 * 1000);
-        const startTime = resetTime - originalDuration;
-        const newResetTime = new Date(startTime + newDurationMs);
-        const now = new Date();
-
-        if (newResetTime <= now) {
-          return { ...es, status: 'Available' as StatusType, remainingRequests: es.maximumRequests, estimatedResetTime: undefined, estimatedResetDuration: undefined, updatedAt: now.toISOString() };
-        }
-        return { ...es, estimatedResetTime: newResetTime.toISOString(), estimatedResetDuration: newDurationMs, updatedAt: now.toISOString() };
-      });
-      setEmailServices(updatedRelations);
-
-      try {
-        await Promise.all(updatedRelations.filter((es) => es.serviceId === id && (es.status === 'Available' || es.status === 'Cooling Down' || es.status === 'Limit Reached')).map((es) => api.updateEmailService(es)));
-        await refreshFromServer();
-      } catch (error) {
-        reportSyncFailure('Failed to propagate service cooldown changes', error);
-        await refreshFromServer();
-      }
-    }
-
     await refreshFromServer();
   };
 
@@ -453,57 +394,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     cooldownMinutes?: number, remainingRequests?: number, maximumRequests?: number,
     notes?: string, overrideResetTime?: string
   ) => {
-    const now = new Date();
-    const emailObj = emails.find((e) => e.id === emailId);
-    const serviceObj = services.find((s) => s.id === serviceId);
-    const nickname = emailObj?.nickname ?? 'Account';
-    const emailAddr = emailObj?.email ?? 'unknown';
-    const servName = serviceObj?.name ?? 'Service';
-
-    let estimatedResetTime: string | undefined;
-    let estimatedResetDuration: number | undefined;
-
-    if ((status === 'Cooling Down' || status === 'Limit Reached') && overrideResetTime) {
-      estimatedResetTime = overrideResetTime;
-      estimatedResetDuration = Math.max(0, new Date(overrideResetTime).getTime() - now.getTime());
-    } else if ((status === 'Cooling Down' || status === 'Limit Reached') && cooldownMinutes && cooldownMinutes > 0) {
-      estimatedResetTime = new Date(now.getTime() + cooldownMinutes * 60 * 1000).toISOString();
-      estimatedResetDuration = cooldownMinutes * 60 * 1000;
-    }
-
-    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
-    if (!current) return;
-
-    const updated: EmailService = {
-      ...current, status,
-      remainingRequests: remainingRequests !== undefined ? remainingRequests : current.remainingRequests,
-      maximumRequests: maximumRequests !== undefined ? maximumRequests : current.maximumRequests,
-      estimatedResetTime, estimatedResetDuration,
-      lastLimitReached: status === 'Limit Reached' || status === 'Cooling Down' ? now.toISOString() : current.lastLimitReached,
-      notes: notes || current.notes,
-      updatedAt: now.toISOString(),
-    };
-
-    const historyRecord = current.status !== status ? {
-      id: `hist_${Math.random().toString(36).substring(2, 11)}`,
-      emailServiceId: current.id,
-      emailNickname: nickname,
-      emailAddress: emailAddr,
-      serviceName: servName,
-      event: status === 'Limit Reached' ? 'Reached Limit' : 'Status Changed',
-      timestamp: now.toISOString(),
-      notes: notes || `Manual status update: ${current.status} ➔ ${status}${cooldownMinutes ? ` (${cooldownMinutes}m cooldown)` : ''}`,
-    } as UsageHistory : null;
-
-    setEmailServices((prev) => prev.map((es) => (es.emailId === emailId && es.serviceId === serviceId ? updated : es)));
-
     try {
-      if (historyRecord) {
-        setHistory((h) => [historyRecord, ...h]);
-        await api.createHistory(historyRecord);
-        if (status === 'Limit Reached') playSound('limit');
-      }
-      await api.updateEmailService(updated);
+      await api.updateStatus({ emailId, serviceId, status, cooldownMinutes, remainingRequests, maximumRequests, notes, overrideResetTime });
+      if (status === 'Limit Reached') playSound('limit');
       await refreshFromServer();
     } catch (error) {
       reportSyncFailure('Failed to update status', error);
@@ -512,36 +405,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const startSession = async (emailId: string, serviceId: string) => {
-    const now = new Date();
-    const emailObj = emails.find((e) => e.id === emailId);
-    const serviceObj = services.find((s) => s.id === serviceId);
-    const nickname = emailObj?.nickname ?? 'Account';
-    const emailAddr = emailObj?.email ?? 'unknown';
-    const servName = serviceObj?.name ?? 'Service';
-
-    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
-    if (!current) return;
-
-    const newRemaining = current.remainingRequests !== undefined && current.remainingRequests > 0
-      ? current.remainingRequests - 1 : current.remainingRequests;
-    const updated: EmailService = { ...current, lastUsed: now.toISOString(), remainingRequests: newRemaining, updatedAt: now.toISOString() };
-    const historyRecord: UsageHistory = {
-      id: `hist_${Math.random().toString(36).substring(2, 11)}`,
-      emailServiceId: current.id,
-      emailNickname: nickname,
-      emailAddress: emailAddr,
-      serviceName: servName,
-      event: 'Started Session',
-      timestamp: now.toISOString(),
-      notes: `Started usage session. ${newRemaining !== undefined ? `Remaining: ${newRemaining}` : ''}`,
-    };
-
-    setEmailServices((prev) => prev.map((es) => (es.emailId === emailId && es.serviceId === serviceId ? updated : es)));
-    setHistory((h) => [historyRecord, ...h]);
-
     try {
-      await api.createHistory(historyRecord);
-      await api.updateEmailService(updated);
+      await api.startSession(emailId, serviceId);
       await refreshFromServer();
     } catch (error) {
       reportSyncFailure('Failed to start session', error);
@@ -579,38 +444,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const resetTimer = async (emailId: string, serviceId: string) => {
-    const now = new Date();
-    const emailObj = emails.find((e) => e.id === emailId);
-    const serviceObj = services.find((s) => s.id === serviceId);
-
-    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
-    if (!current) return;
-
-    const updated: EmailService = {
-      ...current, status: 'Available' as StatusType,
-      remainingRequests: current.maximumRequests,
-      estimatedResetTime: undefined,
-      estimatedResetDuration: undefined,
-      updatedAt: now.toISOString(),
-    };
-    const wasLimited = current.status === 'Limit Reached' || current.status === 'Cooling Down';
-    const historyRecord = wasLimited ? {
-      id: `hist_${Math.random().toString(36).substring(2, 11)}`,
-      emailServiceId: current.id,
-      emailNickname: emailObj?.nickname ?? 'Account',
-      emailAddress: emailObj?.email ?? 'unknown',
-      serviceName: serviceObj?.name ?? 'Service',
-      event: 'Reset Completed',
-      timestamp: now.toISOString(),
-      notes: 'Timer manually reset. Status changed to Available.',
-    } as UsageHistory : null;
-
-    setEmailServices((prev) => prev.map((es) => (es.emailId === emailId && es.serviceId === serviceId ? updated : es)));
-    if (historyRecord) setHistory((h) => [historyRecord, ...h]);
-
     try {
-      if (historyRecord) await api.createHistory(historyRecord);
-      await api.updateEmailService(updated);
+      await api.resetTimer(emailId, serviceId);
       await refreshFromServer();
     } catch (error) {
       reportSyncFailure('Failed to reset timer', error);
@@ -695,7 +530,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      emails, services, emailServices, history, settings, isLoading, dbStatus, syncError,
+      emails, services, emailServices, history, settings, isLoading, dbStatus, syncError, serverNow,
       addEmail, deleteEmail, updateEmail,
       addService, deleteService, updateService,
       updateStatus, startSession, endSession, reachLimit, resetTimer,

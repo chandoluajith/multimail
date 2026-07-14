@@ -38,7 +38,7 @@ export const api = {
   // ── Data ─────────────────────────────────────────────────────────────────
   async getAllData(): Promise<{
     emails: Email[]; services: Service[]; emailServices: EmailService[];
-    history: UsageHistory[]; settings: AppSettings;
+    history: UsageHistory[]; settings: AppSettings; serverNow: string;
   }> {
     const res = await f(`${API_BASE}/data`);
     await expectOk(res, 'Failed to fetch data');
@@ -115,6 +115,27 @@ export const api = {
   async syncExpiredCooldowns(): Promise<void> {
     const res = await f(`${API_BASE}/actions/sync-expired`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     await expectOk(res, 'Failed to sync expired cooldowns');
+  },
+  async updateStatus(payload: {
+    emailId: string;
+    serviceId: string;
+    status: EmailService['status'];
+    cooldownMinutes?: number;
+    remainingRequests?: number;
+    maximumRequests?: number;
+    notes?: string;
+    overrideResetTime?: string;
+  }): Promise<void> {
+    const res = await f(`${API_BASE}/actions/update-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    await expectOk(res, 'Failed to update status');
+  },
+  async startSession(emailId: string, serviceId: string): Promise<void> {
+    const res = await f(`${API_BASE}/actions/start-session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emailId, serviceId }) });
+    await expectOk(res, 'Failed to start session');
+  },
+  async resetTimer(emailId: string, serviceId: string): Promise<void> {
+    const res = await f(`${API_BASE}/actions/reset-timer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ emailId, serviceId }) });
+    await expectOk(res, 'Failed to reset timer');
   },
 
   // ── Audit & Security ──────────────────────────────────────────────────────

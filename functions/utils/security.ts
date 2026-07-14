@@ -72,6 +72,8 @@ export function getSecurityHeaders(appUrl: string): Record<string, string> {
 
     // Lock down what the API response itself can do
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Pragma': 'no-cache',
 
     // Force HTTPS for 2 years in production
     'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',

@@ -42,6 +42,7 @@ export const DashboardView: React.FC = () => {
  services, 
  emailServices, 
  history,
+ serverNow,
  startSession, 
  endSession, 
  reachLimit, 
@@ -639,6 +640,7 @@ export const DashboardView: React.FC = () => {
  {es.estimatedResetTime && (
  <CountdownTimer
  targetTime={es.estimatedResetTime}
+ serverNow={serverNow}
  className="text-[9px] font-mono font-bold opacity-80"
  />
  )}
@@ -705,6 +707,7 @@ export const DashboardView: React.FC = () => {
  <span className="text-[10px] uppercase font-bold tracking-wider opacity-80 block">Remaining Cooldown</span>
  <CountdownTimer
  targetTime={activeRelation.estimatedResetTime}
+ serverNow={serverNow}
  className="text-base font-mono font-bold theme-text-primary"
  showLabels
  />

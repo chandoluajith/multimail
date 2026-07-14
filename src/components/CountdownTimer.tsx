@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 interface CountdownTimerProps {
   targetTime: string; // ISO string
+  serverNow?: string; // ISO string from the backend; used as the display clock anchor
   onComplete?: () => void;
   className?: string;
   showLabels?: boolean;
@@ -17,10 +18,19 @@ interface TimeLeft {
 
 export const CountdownTimer: React.FC<CountdownTimerProps> = ({
   targetTime,
+  serverNow,
   onComplete,
   className = '',
   showLabels = false,
 }) => {
+  const clockAnchor = useMemo(() => {
+    const serverMs = serverNow ? Date.parse(serverNow) : NaN;
+    return {
+      serverMs: Number.isFinite(serverMs) ? serverMs : Date.now(),
+      performanceMs: typeof performance !== 'undefined' ? performance.now() : 0,
+    };
+  }, [serverNow]);
+
   const [timeLeft, setTimeLeft] = useState<TimeLeft>({
     days: 0,
     hours: 0,
@@ -30,12 +40,19 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
   });
 
   useEffect(() => {
+    let completed = false;
     const calculateTime = () => {
-      const difference = +new Date(targetTime) - +new Date();
+      const targetMs = Date.parse(targetTime);
+      const elapsedMs = typeof performance !== 'undefined' ? performance.now() - clockAnchor.performanceMs : 0;
+      const nowMs = clockAnchor.serverMs + Math.max(0, elapsedMs);
+      const difference = targetMs - nowMs;
 
       if (difference <= 0) {
         setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true });
-        if (onComplete) onComplete();
+        if (!completed) {
+          completed = true;
+          if (onComplete) onComplete();
+        }
         return true;
       }
 
@@ -57,7 +74,7 @@ export const CountdownTimer: React.FC<CountdownTimerProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [targetTime, onComplete]);
+  }, [clockAnchor, targetTime, onComplete]);
 
   if (timeLeft.isExpired) {
     return <span className={className}>Ready</span>;
