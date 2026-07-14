@@ -394,6 +394,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     cooldownMinutes?: number, remainingRequests?: number, maximumRequests?: number,
     notes?: string, overrideResetTime?: string
   ) => {
+    const now = new Date();
+    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
+    if (current) {
+      let estimatedResetTime: string | undefined;
+      let estimatedResetDuration: number | undefined;
+      const isCooldownStatus = status === 'Cooling Down' || status === 'Limit Reached';
+
+      if (isCooldownStatus && overrideResetTime) {
+        const resetMs = Date.parse(overrideResetTime);
+        if (Number.isFinite(resetMs) && resetMs > now.getTime()) {
+          estimatedResetTime = new Date(resetMs).toISOString();
+          estimatedResetDuration = resetMs - now.getTime();
+        }
+      } else if (isCooldownStatus) {
+        const minutes = cooldownMinutes && cooldownMinutes > 0 ? cooldownMinutes : getServiceCooldownMinutes(serviceId);
+        estimatedResetTime = new Date(now.getTime() + minutes * 60 * 1000).toISOString();
+        estimatedResetDuration = minutes * 60 * 1000;
+      }
+
+      const optimistic: EmailService = {
+        ...current,
+        status,
+        remainingRequests: remainingRequests !== undefined
+          ? remainingRequests
+          : status === 'Available'
+            ? maximumRequests ?? current.maximumRequests
+            : current.remainingRequests,
+        maximumRequests: maximumRequests !== undefined ? maximumRequests : current.maximumRequests,
+        lastLimitReached: isCooldownStatus ? now.toISOString() : current.lastLimitReached,
+        estimatedResetTime,
+        estimatedResetDuration,
+        notes: notes || current.notes,
+        updatedAt: now.toISOString(),
+      };
+      setEmailServices((prev) => prev.map((es) => (es.id === current.id ? optimistic : es)));
+      setServerNow(now.toISOString());
+    }
+
     try {
       await api.updateStatus({ emailId, serviceId, status, cooldownMinutes, remainingRequests, maximumRequests, notes, overrideResetTime });
       if (status === 'Limit Reached') playSound('limit');
@@ -444,6 +482,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const resetTimer = async (emailId: string, serviceId: string) => {
+    const now = new Date().toISOString();
+    const current = emailServices.find((es) => es.emailId === emailId && es.serviceId === serviceId);
+    if (current) {
+      setEmailServices((prev) => prev.map((es) => es.id === current.id ? {
+        ...es,
+        status: 'Available' as StatusType,
+        remainingRequests: es.maximumRequests,
+        estimatedResetTime: undefined,
+        estimatedResetDuration: undefined,
+        updatedAt: now,
+      } : es));
+      setServerNow(now);
+    }
+
     try {
       await api.resetTimer(emailId, serviceId);
       await refreshFromServer();

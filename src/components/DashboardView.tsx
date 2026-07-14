@@ -235,10 +235,11 @@ export const DashboardView: React.FC = () => {
  setCustomNotes(relation.notes || '');
 
  // If there's an existing estimated reset time, pre-populate the override picker
+ // but keep Duration mode active so "Trigger Cooldown" restarts from now.
+ setUseOverride(false);
  if (relation.estimatedResetTime) {
  const resetDate = new Date(relation.estimatedResetTime);
  if (!isNaN(resetDate.getTime())) {
- setUseOverride(true);
  const y = resetDate.getFullYear();
  const m = String(resetDate.getMonth() + 1).padStart(2, '0');
  const d = String(resetDate.getDate()).padStart(2, '0');
@@ -250,14 +251,8 @@ export const DashboardView: React.FC = () => {
  setOverrideHour(String(h));
  setOverrideMinute(String(min).padStart(2, '0'));
  setOverrideAmPm(ampm as 'AM' | 'PM');
- } else {
- setUseOverride(false);
  }
- } else {
- setUseOverride(false);
  }
- } else {
- setUseOverride(false);
  }
 
  // Auto-populate cooldown from the service's default policy

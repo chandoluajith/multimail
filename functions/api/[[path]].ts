@@ -733,14 +733,21 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         userId,
       ).run();
 
-      if (row.status !== nextStatus) {
+      const cooldownRestarted =
+        isCooldownStatus(status) &&
+        nextStatus !== 'Available' &&
+        row.estimatedResetTime !== estimatedResetTime;
+
+      if (row.status !== nextStatus || cooldownRestarted) {
         await insertHistory(
           db,
           userId,
           row,
           status === 'Limit Reached' ? 'Reached Limit' : 'Status Changed',
           nowIso,
-          body.notes || `Manual status update: ${normalizeStatus(row.status)} -> ${nextStatus}`,
+          body.notes || (cooldownRestarted
+            ? `Cooldown restarted. New reset time: ${estimatedResetTime}`
+            : `Manual status update: ${normalizeStatus(row.status)} -> ${nextStatus}`),
         );
       }
 
