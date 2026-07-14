@@ -455,7 +455,8 @@ export const DashboardView: React.FC = () => {
  </div>
 
  {/* Search Bar */}
- <div className="relative">
+ <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+ <div className="relative flex-1">
  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 theme-text-muted" size={18} />
  <input
  type="text"
@@ -464,6 +465,24 @@ export const DashboardView: React.FC = () => {
  onChange={(e) => setSearchQuery(e.target.value)}
  className="w-full theme-bg-surface-alt border theme-border-subtle rounded-xl py-2.5 pl-10 pr-4 text-sm theme-text-primary placeholder:theme-text-secondary dark:placeholder:theme-text-secondary focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all font-body"
  />
+ </div>
+ <label className="relative flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-2 self-start lg:self-auto min-w-[220px]">
+ <Mail size={14} className="theme-text-muted" />
+ <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
+ <select
+ value={selectedProvider}
+ onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
+ className="flex-1 appearance-none bg-transparent pr-6 text-sm theme-text-secondary font-semibold focus:outline-none cursor-pointer"
+ >
+ <option value="All" className="theme-bg-primary theme-text-secondary">All Providers</option>
+ {providerList.map(provider => (
+ <option key={provider} value={provider} className="theme-bg-primary theme-text-secondary">
+ {provider}
+ </option>
+ ))}
+ </select>
+ <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 theme-text-secondary pointer-events-none" />
+ </label>
  </div>
 
  {/* Horizontal Scrollable Filter Chips */}
@@ -517,33 +536,6 @@ export const DashboardView: React.FC = () => {
  </motion.button>
  ))}
  </div>
-
- {/* Subtle divider */}
- <div className="border-t theme-border-subtle" />
-
- {/* ── Provider Filter Dropdown ── */}
- <div className="flex items-center">
- <label className="relative flex items-center gap-2 theme-bg-surface-alt border theme-border-subtle rounded-xl px-3 py-2 min-w-[220px]">
- <Mail size={14} className="theme-text-muted" />
- <span className="text-xs theme-text-muted font-semibold uppercase">Provider:</span>
- <select
- value={selectedProvider}
- onChange={(e) => setSelectedProvider(e.target.value as ProviderType | 'All')}
- className="flex-1 appearance-none bg-transparent pr-6 text-sm theme-text-secondary font-semibold focus:outline-none cursor-pointer"
- >
- <option value="All" className="theme-bg-primary theme-text-secondary">All Providers</option>
- {providerList.map(provider => (
- <option key={provider} value={provider} className="theme-bg-primary theme-text-secondary">
- {provider}
- </option>
- ))}
- </select>
- <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 theme-text-secondary pointer-events-none" />
- </label>
- </div>
-
- {/* Subtle divider */}
- <div className="border-t theme-border-subtle" />
 
  {/* ── Sort Filter Chips ── */}
  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar chip-scroll pb-0.5">
