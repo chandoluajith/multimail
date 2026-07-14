@@ -115,8 +115,8 @@ export const DashboardView: React.FC = () => {
   };
 
   const alphabetical = (a: typeof emails[number], b: typeof emails[number]) =>
-    (a.nickname || a.email).localeCompare(b.nickname || b.email, undefined, { sensitivity: 'base' }) ||
-    a.email.localeCompare(b.email, undefined, { sensitivity: 'base' });
+    (a.nickname || a.email).localeCompare(b.nickname || b.email, undefined, { sensitivity: 'base', numeric: true }) ||
+    a.email.localeCompare(b.email, undefined, { sensitivity: 'base', numeric: true });
 
   return emails.filter(email => {
     const matchesSearch = 

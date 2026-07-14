@@ -190,8 +190,8 @@ export const AccountsView: React.FC = () => {
     };
 
     const alphabetical = (a: Email, b: Email) =>
-      (a.nickname || a.email).localeCompare(b.nickname || b.email, undefined, { sensitivity: 'base' }) ||
-      a.email.localeCompare(b.email, undefined, { sensitivity: 'base' });
+      (a.nickname || a.email).localeCompare(b.nickname || b.email, undefined, { sensitivity: 'base', numeric: true }) ||
+      a.email.localeCompare(b.email, undefined, { sensitivity: 'base', numeric: true });
 
     return emails
       .filter((email) => {
